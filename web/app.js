@@ -290,10 +290,6 @@
     return "continue";
   }
 
-  function maneuverFitsObstacle(obstacle, action) {
-    return action === defaultManeuver(obstacle);
-  }
-
   function executeScheduledAction(obstacle, action) {
     const distance = Math.max(0, obstacle.x - (dino.x + dino.width));
     const framesToCollision = distance / Math.max(effectiveSpeed(), 1);
@@ -312,18 +308,8 @@
   }
 
   function scheduleJevAction(obstacle) {
-    if (obstacle.actionExecuted) return;
-    if (obstacle.plannedAction && maneuverFitsObstacle(obstacle, obstacle.plannedAction)) {
-      executeScheduledAction(obstacle, obstacle.plannedAction);
-      return;
-    }
-
-    const safetyDecision = ruleDecision(obstacle);
-    const safetyAction = typeof safetyDecision === "string" ? safetyDecision : safetyDecision.action;
-    if (safetyAction === "continue") return;
-    obstacle.usedSafetyFallback = true;
-    obstacle.actionExecuted = true;
-    executeRuleDecision(obstacle);
+    if (obstacle.actionExecuted || !obstacle.plannedAction) return;
+    executeScheduledAction(obstacle, obstacle.plannedAction);
   }
 
   async function requestJevDecision(obstacle) {
@@ -377,7 +363,8 @@
         confidence: .91,
         collision_risk: distance < 160 ? 4 : 1,
         latency_ms: Math.round(performance.now() - started),
-        engine: "browser simulation"
+        engine: "browser simulation",
+        fallback_reason: "API ERROR"
       };
       showDecision(fallback, state);
       const liveObstacle = obstacles.find(item => item.id === obstacle.id);
@@ -404,7 +391,7 @@
     els["state-speed"].textContent = state.speed.toFixed(1);
     updateRisk(risk);
     latencies.push(decision.latency_ms);
-    addLog(action, decision.confidence || 0, decision.latency_ms);
+    addLog(action, decision.confidence || 0, decision.latency_ms, decision.fallback_reason);
     setEngineBadge();
     updateMetrics();
   }
@@ -422,7 +409,8 @@
   }
 
   function addLog(action, confidence, latency) {
-    logs.unshift({ time: timestamp(), action, confidence: Math.round(confidence * 100), latency });
+    const fallbackReason = arguments[3] || "";
+    logs.unshift({ time: timestamp(), action, confidence: Math.round(confidence * 100), latency, fallbackReason });
     renderLogs();
   }
 
@@ -441,8 +429,10 @@
     }
     els["decision-log"].innerHTML = logs.map(item => `
       <div class="log-entry">
-        <i class="log-dot"></i><span>${item.time}</span><strong class="log-action">${item.action.toUpperCase()}</strong>
-        <span>${item.confidence}%</span><span>${item.latency} ms</span>
+        <i class="log-dot"></i><span>${item.time}</span><strong class="log-action">${item.action.toUpperCase()}
+          ${item.fallbackReason ? `<small class="fallback-badge">FALLBACK · ${item.fallbackReason}</small>` : ""}
+        </strong>
+        <span>${item.confidence}%</span><span>${item.latency === null ? "—" : `${item.latency} ms`}</span>
       </div>`).join("");
   }
 

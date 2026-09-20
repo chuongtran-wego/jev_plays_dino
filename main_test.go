@@ -93,22 +93,31 @@ func TestValidAction(t *testing.T) {
 	}
 }
 
-func TestFormatDecisionLogIncludesResponseAndLatencies(t *testing.T) {
+func TestFormatDecisionLogIncludesOnlyAPILatencyAndProbabilities(t *testing.T) {
 	result := decisionResponse{
 		ObstacleID: "obstacle-7",
 		Action:     "jump",
-		LatencyMS:  287,
-		Engine:     "jev",
+		Probabilities: map[string]float64{
+			"jump":     0.93,
+			"duck":     0.01,
+			"continue": 0.06,
+		},
+		LatencyMS: 287,
+		Engine:    "jev",
 	}
 
 	line := formatDecisionLog(result, 305*time.Millisecond)
 	for _, want := range []string{
-		`response={"obstacle_id":"obstacle-7","action":"jump"`,
 		"api_latency_ms=287",
-		"server_latency_ms=305",
+		`probabilities={"continue":0.06,"duck":0.01,"jump":0.93}`,
 	} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("expected log line to contain %q, got %q", want, line)
+		}
+	}
+	for _, unwanted := range []string{"response=", "server_latency_ms=", "obstacle-7", "action=", "engine="} {
+		if strings.Contains(line, unwanted) {
+			t.Fatalf("expected log line not to contain %q, got %q", unwanted, line)
 		}
 	}
 }

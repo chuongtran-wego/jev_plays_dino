@@ -78,14 +78,25 @@ test("Jev requests one early maneuver plan per obstacle", () => {
   assert.match(app, /liveObstacle\.plannedAction = decision\.action;/);
 });
 
-test("remote maneuvers are scheduled locally with a deadline fallback", () => {
+test("Jev mode only schedules maneuvers returned by Jev", () => {
   const requestDecision = app.match(/async function requestJevDecision\(obstacle\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+  const scheduleJevAction = app.match(/function scheduleJevAction\(obstacle\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
 
   assert.doesNotMatch(requestDecision, /executeAction\(decision\.action\)/);
   assert.match(app, /function scheduleJevAction\(obstacle\)/);
-  assert.match(app, /executeScheduledAction\(obstacle, obstacle\.plannedAction\)/);
-  assert.match(app, /executeRuleDecision\(obstacle\)/);
+  assert.match(scheduleJevAction, /if \(obstacle\.actionExecuted \|\| !obstacle\.plannedAction\) return;/);
+  assert.match(scheduleJevAction, /executeScheduledAction\(obstacle, obstacle\.plannedAction\)/);
+  assert.doesNotMatch(scheduleJevAction, /ruleDecision|executeRuleDecision|defaultManeuver|fallback/i);
   assert.match(app, /if \(!liveObstacle \|\| gameOver \|\| liveObstacle\.actionExecuted\) return;/);
+});
+
+test("Jev API error fallback is identified in the decision log", () => {
+  const requestDecision = app.match(/async function requestJevDecision\(obstacle\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+  const showDecision = app.match(/function showDecision\(decision, state\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+
+  assert.match(requestDecision, /fallback_reason:\s*"API ERROR"/);
+  assert.match(showDecision, /decision\.fallback_reason/);
+  assert.match(app, /class="fallback-badge"/);
 });
 
 test("decision latency is measured end to end in the browser", () => {

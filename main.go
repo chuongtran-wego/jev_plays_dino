@@ -176,12 +176,12 @@ func validAction(action string) bool {
 	return action == "jump" || action == "duck" || action == "continue"
 }
 
-func formatDecisionLog(result decisionResponse, serverLatency time.Duration) string {
-	response, err := json.Marshal(result)
+func formatDecisionLog(result decisionResponse, _ time.Duration) string {
+	probabilities, err := json.Marshal(result.Probabilities)
 	if err != nil {
-		return fmt.Sprintf("decision response_marshal_error=%q api_latency_ms=%d server_latency_ms=%d", err, result.LatencyMS, serverLatency.Milliseconds())
+		probabilities = []byte("{}")
 	}
-	return fmt.Sprintf("decision response=%s api_latency_ms=%d server_latency_ms=%d", response, result.LatencyMS, serverLatency.Milliseconds())
+	return fmt.Sprintf("decision api_latency_ms=%d probabilities=%s", result.LatencyMS, probabilities)
 }
 
 func mockDecision(state decisionRequest) decisionResponse {
