@@ -139,7 +139,6 @@
     obstacles = [];
     obstacleCounter = 0;
     spawnObstacle();
-    obstacles[0].x = 620;
     pendingDecision = false;
     activeInput = "continue";
     duckUntil = 0;
@@ -361,7 +360,6 @@
             ? { jump: .05, duck: .89, continue: .06 }
             : { jump: .06, duck: .03, continue: .91 },
         confidence: .91,
-        collision_risk: distance < 160 ? 4 : 1,
         latency_ms: Math.round(performance.now() - started),
         engine: "browser simulation",
         fallback_reason: "API ERROR"
@@ -378,7 +376,7 @@
   function showDecision(decision, state) {
     const probabilities = decision.probabilities || { jump: 0, duck: 0, continue: 1 };
     const action = decision.action || "continue";
-    const risk = Number(decision.collision_risk || 0);
+    const risk = (1 - (probabilities.continue || 0)) * 5;
     engine = decision.engine || engine;
     els["decision-action"].textContent = action.toUpperCase();
     els.confidence.textContent = `${Math.round((decision.confidence || 0) * 100)}%`;

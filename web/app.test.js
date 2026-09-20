@@ -53,6 +53,15 @@ test("starting a game clears decision history", () => {
   assert.match(clearDecisionHistory, /updateMetrics\(\)/);
 });
 
+test("try again lets the first obstacle enter from beyond the right edge", () => {
+  const resetGame = app.match(/function resetGame\([^)]*\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+  const spawnObstacle = app.match(/function spawnObstacle\(\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+
+  assert.match(resetGame, /spawnObstacle\(\)/);
+  assert.doesNotMatch(resetGame, /obstacles\[0\]\.x\s*=/);
+  assert.match(spawnObstacle, /x:\s*WIDTH \+ 20/);
+});
+
 test("reset enters a waiting state until Start again is clicked", () => {
   const resetGame = app.match(/function resetGame\(([^)]*)\)\s*\{([\s\S]*?)\n  \}/);
 
@@ -97,6 +106,13 @@ test("Jev API error fallback is identified in the decision log", () => {
   assert.match(requestDecision, /fallback_reason:\s*"API ERROR"/);
   assert.match(showDecision, /decision\.fallback_reason/);
   assert.match(app, /class="fallback-badge"/);
+});
+
+test("collision risk is derived locally from action probabilities", () => {
+  const showDecision = app.match(/function showDecision\(decision, state\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+
+  assert.match(showDecision, /const risk = \(1 - \(probabilities\.continue \|\| 0\)\) \* 5;/);
+  assert.doesNotMatch(showDecision, /decision\.collision_risk/);
 });
 
 test("decision latency is measured end to end in the browser", () => {

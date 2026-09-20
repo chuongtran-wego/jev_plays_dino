@@ -44,7 +44,6 @@ type decisionResponse struct {
 	Action        string             `json:"action"`
 	Probabilities map[string]float64 `json:"probabilities"`
 	Confidence    float64            `json:"confidence"`
-	CollisionRisk float64            `json:"collision_risk"`
 	LatencyMS     int64              `json:"latency_ms"`
 	Engine        string             `json:"engine"`
 }
@@ -100,23 +99,23 @@ func (c *jevClient) decide(ctx context.Context, state decisionRequest) (decision
 		return result, nil
 	}
 
+	modelState := map[string]any{
+		"obstacle_type":        state.Obstacle.Type,
+		"time_to_collision_ms": state.TimeToCollision,
+		"dino_state":           state.DinoState,
+	}
 	payload := map[string]any{
 		"model": "jev-latest",
-		"state": state,
+		"state": modelState,
 		"questions": map[string]any{
 			"next_action": map[string]any{
 				"type":         "choice",
-				"instructions": "Choose the maneuver that should be used to safely pass this obstacle. The game schedules the key press locally, so choose the eventual maneuver even when the obstacle is still far away.",
+				"instructions": "Select the maneuver for this obstacle.",
 				"criteria": map[string]any{
-					"jump":     "Plan a jump to clear a ground cactus or another obstacle that cannot be safely passed while running or ducking.",
-					"duck":     "Plan to duck under a low-flying bird.",
-					"continue": "No evasive maneuver is needed for this obstacle, such as a high-flying bird.",
+					"jump":     "Ground cactus.",
+					"duck":     "Low bird.",
+					"continue": "High bird.",
 				},
-			},
-			"collision_risk": map[string]any{
-				"type":         "score",
-				"instructions": "Rate the risk of collision if no new action is taken now.",
-				"criteria":     []string{"Very low", "Low", "Medium", "High", "Imminent"},
 			},
 		},
 	}
@@ -138,7 +137,14 @@ func (c *jevClient) decide(ctx context.Context, state decisionRequest) (decision
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		_, drainErr := io.Copy(io.Discard, resp.Body)
+		if readErr != nil {
+			return decisionResponse{}, readErr
+		}
+		if drainErr != nil {
+			return decisionResponse{}, drainErr
+		}
 		return decisionResponse{}, fmt.Errorf("typesafe returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
 	}
 
@@ -149,12 +155,13 @@ func (c *jevClient) decide(ctx context.Context, state decisionRequest) (decision
 				Probabilities map[string]float64 `json:"probabilities"`
 				Confidence    float64            `json:"confidence"`
 			} `json:"next_action"`
-			CollisionRisk struct {
-				Score float64 `json:"score"`
-			} `json:"collision_risk"`
 		} `json:"answers"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return decisionResponse{}, err
+	}
+	if err := json.Unmarshal(responseBody, &result); err != nil {
 		return decisionResponse{}, err
 	}
 	if !validAction(result.Answers.NextAction.Choice) {
@@ -166,7 +173,6 @@ func (c *jevClient) decide(ctx context.Context, state decisionRequest) (decision
 		Action:        result.Answers.NextAction.Choice,
 		Probabilities: result.Answers.NextAction.Probabilities,
 		Confidence:    result.Answers.NextAction.Confidence,
-		CollisionRisk: result.Answers.CollisionRisk.Score,
 		LatencyMS:     time.Since(started).Milliseconds(),
 		Engine:        "jev",
 	}, nil
@@ -187,19 +193,14 @@ func formatDecisionLog(result decisionResponse, _ time.Duration) string {
 func mockDecision(state decisionRequest) decisionResponse {
 	action := "continue"
 	probabilities := map[string]float64{"jump": 0.05, "duck": 0.03, "continue": 0.92}
-	risk := 0.6
-
 	if strings.HasPrefix(state.Obstacle.Type, "cactus") {
 		action = "jump"
 		probabilities = map[string]float64{"jump": 0.93, "duck": 0.01, "continue": 0.06}
-		risk = 4.4
 	} else if state.Obstacle.Type == "bird_low" {
 		action = "duck"
 		probabilities = map[string]float64{"jump": 0.08, "duck": 0.87, "continue": 0.05}
-		risk = 4.2
 	} else if state.Obstacle.Type == "bird_high" {
 		probabilities = map[string]float64{"jump": 0.03, "duck": 0.04, "continue": 0.93}
-		risk = 0.4
 	}
 
 	confidence := probabilities[action]
@@ -208,7 +209,6 @@ func mockDecision(state decisionRequest) decisionResponse {
 		Action:        action,
 		Probabilities: probabilities,
 		Confidence:    confidence,
-		CollisionRisk: risk,
 	}
 }
 
