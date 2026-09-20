@@ -8,7 +8,7 @@ Jev Plays Dino is a browser game that lets [TypeSafe AI](https://typesafe.ai/)'s
 
 - Three play modes: Human, deterministic Rule bot, and Jev AI.
 - Typed Jev decisions with visible probabilities, confidence, collision risk, and latency.
-- Starting-speed presets at `1x`, `2x`, and `3x`; every run continues accelerating from the selected starting speed.
+- Starting-speed presets at `1x`, `2x`, `4x`, and `8x`; every run continues accelerating from the selected starting speed.
 - Pixel-style sound effects implemented with the Web Audio API.
 - Responsive two-panel interface with the game on the left and the decision log on the right.
 - Simulation fallback when no TypeSafe API key is configured.
@@ -50,7 +50,7 @@ Open <http://localhost:8080>. Values already exported in your shell take precede
 - **Rule** — a deterministic local controller uses obstacle type, distance, and current speed.
 - **Jev** — the Go server sends structured game state to Jev and returns a typed action.
 
-The `1x`, `2x`, and `3x` controls select the starting speed for the next run. Speed then increases gradually as the score grows, matching the original endless-runner behavior.
+The `1x`, `2x`, `4x`, and `8x` controls select the starting speed for the next run. Speed then increases gradually as the score grows, matching the original endless-runner behavior.
 
 ## Project structure
 

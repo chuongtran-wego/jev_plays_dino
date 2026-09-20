@@ -28,7 +28,8 @@
           <span>Start speed</span>
           <button class="speed-button active" data-speed="1">1×</button>
           <button class="speed-button" data-speed="2">2×</button>
-          <button class="speed-button" data-speed="3">3×</button>
+          <button class="speed-button" data-speed="4">4×</button>
+          <button class="speed-button" data-speed="8">8×</button>
         </div>
         <button id="sound-button" class="control-button" aria-label="Mute sound" title="Mute sound">♫ <span id="sound-label">Sound</span></button>
         <button id="pause-button" class="control-button" aria-label="Pause game">Ⅱ <span>Pause</span></button>
@@ -46,7 +47,7 @@
             <span>SPEED <strong id="canvas-speed">1.0×</strong></span>
           </div>
           <div id="game-over" class="game-over hidden">
-            <span class="eyebrow">RUN ENDED</span>
+            <span id="game-over-label" class="eyebrow">RUN ENDED</span>
             <strong id="final-score">Score 0</strong>
             <button id="try-again-button">Try again</button>
           </div>

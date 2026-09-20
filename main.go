@@ -40,19 +40,19 @@ type decisionRequest struct {
 }
 
 type decisionResponse struct {
-	ObstacleID   string             `json:"obstacle_id"`
-	Action       string             `json:"action"`
+	ObstacleID    string             `json:"obstacle_id"`
+	Action        string             `json:"action"`
 	Probabilities map[string]float64 `json:"probabilities"`
-	Confidence   float64            `json:"confidence"`
-	CollisionRisk float64           `json:"collision_risk"`
-	LatencyMS    int64              `json:"latency_ms"`
-	Engine       string             `json:"engine"`
+	Confidence    float64            `json:"confidence"`
+	CollisionRisk float64            `json:"collision_risk"`
+	LatencyMS     int64              `json:"latency_ms"`
+	Engine        string             `json:"engine"`
 }
 
 type jevClient struct {
-	apiKey string
+	apiKey  string
 	baseURL string
-	client *http.Client
+	client  *http.Client
 }
 
 func newJevClient() *jevClient {
@@ -61,10 +61,29 @@ func newJevClient() *jevClient {
 		baseURL = "https://api.typesafe.ai"
 	}
 	return &jevClient{
-		apiKey: os.Getenv("TYPESAFE_API_KEY"),
+		apiKey:  os.Getenv("TYPESAFE_API_KEY"),
 		baseURL: baseURL,
-		client: &http.Client{Timeout: 3 * time.Second},
+		client:  &http.Client{Timeout: 3 * time.Second},
 	}
+}
+
+func (c *jevClient) warm(ctx context.Context) error {
+	if c.apiKey == "" {
+		return nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, c.baseURL+"/v1/systemone", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, err = io.Copy(io.Discard, resp.Body)
+	return err
 }
 
 func (c *jevClient) decide(ctx context.Context, state decisionRequest) (decisionResponse, error) {
@@ -86,18 +105,18 @@ func (c *jevClient) decide(ctx context.Context, state decisionRequest) (decision
 		"state": state,
 		"questions": map[string]any{
 			"next_action": map[string]any{
-				"type": "choice",
-				"instructions": "Choose the safest immediate action for the dinosaur. Account for obstacle type, distance, speed, time to collision, and current dinosaur state. Do not act earlier than necessary.",
+				"type":         "choice",
+				"instructions": "Choose the maneuver that should be used to safely pass this obstacle. The game schedules the key press locally, so choose the eventual maneuver even when the obstacle is still far away.",
 				"criteria": map[string]any{
-					"jump": "Jump now to clear a ground obstacle or a bird that cannot be safely ducked under.",
-					"duck": "Duck now under a low-flying bird.",
-					"continue": "Do not press a key yet; keep running or keep the current airborne motion.",
+					"jump":     "Plan a jump to clear a ground cactus or another obstacle that cannot be safely passed while running or ducking.",
+					"duck":     "Plan to duck under a low-flying bird.",
+					"continue": "No evasive maneuver is needed for this obstacle, such as a high-flying bird.",
 				},
 			},
 			"collision_risk": map[string]any{
-				"type": "score",
+				"type":         "score",
 				"instructions": "Rate the risk of collision if no new action is taken now.",
-				"criteria": []string{"Very low", "Low", "Medium", "High", "Imminent"},
+				"criteria":     []string{"Very low", "Low", "Medium", "High", "Imminent"},
 			},
 		},
 	}
@@ -143,13 +162,13 @@ func (c *jevClient) decide(ctx context.Context, state decisionRequest) (decision
 	}
 
 	return decisionResponse{
-		ObstacleID: state.Obstacle.ID,
-		Action: result.Answers.NextAction.Choice,
+		ObstacleID:    state.Obstacle.ID,
+		Action:        result.Answers.NextAction.Choice,
 		Probabilities: result.Answers.NextAction.Probabilities,
-		Confidence: result.Answers.NextAction.Confidence,
+		Confidence:    result.Answers.NextAction.Confidence,
 		CollisionRisk: result.Answers.CollisionRisk.Score,
-		LatencyMS: time.Since(started).Milliseconds(),
-		Engine: "jev",
+		LatencyMS:     time.Since(started).Milliseconds(),
+		Engine:        "jev",
 	}, nil
 }
 
@@ -157,28 +176,27 @@ func validAction(action string) bool {
 	return action == "jump" || action == "duck" || action == "continue"
 }
 
+func formatDecisionLog(result decisionResponse, serverLatency time.Duration) string {
+	response, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Sprintf("decision response_marshal_error=%q api_latency_ms=%d server_latency_ms=%d", err, result.LatencyMS, serverLatency.Milliseconds())
+	}
+	return fmt.Sprintf("decision response=%s api_latency_ms=%d server_latency_ms=%d", response, result.LatencyMS, serverLatency.Milliseconds())
+}
+
 func mockDecision(state decisionRequest) decisionResponse {
 	action := "continue"
 	probabilities := map[string]float64{"jump": 0.05, "duck": 0.03, "continue": 0.92}
-	distance := state.Obstacle.Distance
 	risk := 0.6
 
 	if strings.HasPrefix(state.Obstacle.Type, "cactus") {
-		threshold := 122.0 + state.Speed*5
-		if distance <= threshold && state.DinoState == "running" {
-			action = "jump"
-			probabilities = map[string]float64{"jump": 0.93, "duck": 0.01, "continue": 0.06}
-			risk = 4.4
-		} else if distance < threshold+90 {
-			probabilities = map[string]float64{"jump": 0.36, "duck": 0.02, "continue": 0.62}
-			risk = 2.7
-		}
+		action = "jump"
+		probabilities = map[string]float64{"jump": 0.93, "duck": 0.01, "continue": 0.06}
+		risk = 4.4
 	} else if state.Obstacle.Type == "bird_low" {
-		if distance <= 135 {
-			action = "duck"
-			probabilities = map[string]float64{"jump": 0.08, "duck": 0.87, "continue": 0.05}
-			risk = 4.2
-		}
+		action = "duck"
+		probabilities = map[string]float64{"jump": 0.08, "duck": 0.87, "continue": 0.05}
+		risk = 4.2
 	} else if state.Obstacle.Type == "bird_high" {
 		probabilities = map[string]float64{"jump": 0.03, "duck": 0.04, "continue": 0.93}
 		risk = 0.4
@@ -186,16 +204,16 @@ func mockDecision(state decisionRequest) decisionResponse {
 
 	confidence := probabilities[action]
 	return decisionResponse{
-		ObstacleID: state.Obstacle.ID,
-		Action: action,
+		ObstacleID:    state.Obstacle.ID,
+		Action:        action,
 		Probabilities: probabilities,
-		Confidence: confidence,
+		Confidence:    confidence,
 		CollisionRisk: risk,
 	}
 }
 
 type rateLimiter struct {
-	mu sync.Mutex
+	mu      sync.Mutex
 	clients map[string]*rateWindow
 }
 
@@ -240,6 +258,13 @@ func main() {
 		log.Fatalf("load .env: %v", err)
 	}
 	client := newJevClient()
+	if client.apiKey != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if err := client.warm(ctx); err != nil {
+			log.Printf("TypeSafe preconnect failed: %v", err)
+		}
+		cancel()
+	}
 	limiter := newRateLimiter()
 	mux := http.NewServeMux()
 
@@ -247,6 +272,7 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "engine": map[bool]string{true: "jev", false: "simulation"}[client.apiKey != ""]})
 	})
 	mux.HandleFunc("POST /api/decision", func(w http.ResponseWriter, req *http.Request) {
+		started := time.Now()
 		if !limiter.allow(clientIP(req)) {
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
 			return
@@ -267,6 +293,7 @@ func main() {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "decision service unavailable"})
 			return
 		}
+		log.Print(formatDecisionLog(result, time.Since(started)))
 		writeJSON(w, http.StatusOK, result)
 	})
 
@@ -285,12 +312,12 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr: ":" + port,
-		Handler: securityHeaders(mux),
+		Addr:              ":" + port,
+		Handler:           securityHeaders(mux),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout: 5 * time.Second,
-		WriteTimeout: 8 * time.Second,
-		IdleTimeout: 60 * time.Second,
+		ReadTimeout:       5 * time.Second,
+		WriteTimeout:      8 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	log.Printf("Jev Plays Dino listening on http://localhost:%s", port)
 	log.Fatal(server.ListenAndServe())

@@ -5,7 +5,7 @@
   const ctx = canvas.getContext("2d");
   const els = Object.fromEntries([
     "engine-label", "engine-badge", "player-label", "canvas-score", "canvas-speed",
-    "game-over", "final-score", "sound-button", "sound-label", "pause-button", "reset-button", "try-again-button",
+    "game-over", "game-over-label", "final-score", "sound-button", "sound-label", "pause-button", "reset-button", "try-again-button",
     "jump-key", "duck-key", "input-state", "decision-action", "confidence", "latency",
     "jump-bar", "continue-bar", "duck-bar", "jump-probability", "continue-probability",
     "duck-probability", "state-obstacle", "state-distance", "state-speed", "state-risk",
@@ -20,10 +20,12 @@
   const MAX_SPEED_GAIN = 5.5;
   const GRAVITY = 0.72;
   const JUMP_VELOCITY = -14.2;
+  const PLANNING_LOOKAHEAD = 900;
 
   let mode = "jev";
   let paused = false;
   let gameOver = false;
+  let awaitingStart = false;
   let score = 0;
   let passed = 0;
   let speed = BASE_SPEED;
@@ -124,10 +126,11 @@
     if (soundEnabled) ensureAudio();
   }
 
-  function resetGame() {
+  function resetGame({ waitForStart = false } = {}) {
     gameSession++;
     paused = false;
     gameOver = false;
+    awaitingStart = waitForStart;
     score = 0;
     passed = 0;
     speed = BASE_SPEED * gameSpeed;
@@ -145,11 +148,15 @@
     dino.onGround = true;
     dino.ducking = false;
     clearDecisionHistory();
-    els["game-over"].classList.add("hidden");
+    els["game-over-label"].textContent = waitForStart ? "READY" : "RUN ENDED";
+    els["final-score"].textContent = waitForStart ? "Start a new run" : "Score 0";
+    els["try-again-button"].textContent = waitForStart ? "Start again" : "Try again";
+    els["game-over"].classList.toggle("hidden", !waitForStart);
     els["pause-button"].innerHTML = "Ⅱ <span>Pause</span>";
     updateInputUI("continue");
+    if (waitForStart) els["input-state"].textContent = "READY";
     updateMetrics();
-    playSound("start");
+    if (!waitForStart) playSound("start");
   }
 
   function setMode(nextMode) {
@@ -169,7 +176,7 @@
   }
 
   function setGameSpeed(multiplier) {
-    if (![1, 2, 3].includes(multiplier)) return;
+    if (![1, 2, 4, 8].includes(multiplier)) return;
     gameSpeed = multiplier;
     document.querySelectorAll(".speed-button").forEach(button => {
       button.classList.toggle("active", Number(button.dataset.speed) === gameSpeed);
@@ -182,7 +189,7 @@
   }
 
   function jump() {
-    if (!dino.onGround || gameOver || paused) return;
+    if (!dino.onGround || gameOver || paused || awaitingStart) return;
     dino.vy = JUMP_VELOCITY;
     dino.onGround = false;
     dino.ducking = false;
@@ -191,7 +198,7 @@
   }
 
   function duck(duration = 480) {
-    if (gameOver || paused) return;
+    if (gameOver || paused || awaitingStart) return;
     const startedDucking = !dino.ducking;
     duckUntil = performance.now() + duration;
     dino.ducking = true;
@@ -237,7 +244,8 @@
     obstacles.push({
       id: `obstacle-${++obstacleCounter}`,
       type, x: WIDTH + 20, y, width: dimensions[0], height: dimensions[1],
-      passed: false, lastAskedDistance: Infinity, wing: 0, isBird
+      passed: false, decisionRequested: false, plannedAction: null,
+      actionExecuted: false, wing: 0, isBird
     });
   }
 
@@ -276,13 +284,54 @@
     duck(decision.duration);
   }
 
+  function defaultManeuver(obstacle) {
+    if (obstacle.type.startsWith("cactus")) return "jump";
+    if (obstacle.type === "bird_low") return "duck";
+    return "continue";
+  }
+
+  function maneuverFitsObstacle(obstacle, action) {
+    return action === defaultManeuver(obstacle);
+  }
+
+  function executeScheduledAction(obstacle, action) {
+    const distance = Math.max(0, obstacle.x - (dino.x + dino.width));
+    const framesToCollision = distance / Math.max(effectiveSpeed(), 1);
+
+    if (action === "jump" && dino.onGround && framesToCollision <= 18) {
+      obstacle.actionExecuted = true;
+      jump();
+      return;
+    }
+    if (action === "duck" && framesToCollision <= 25) {
+      const clearDistance = distance + obstacle.width + dino.width + 18;
+      const holdDuration = Math.max(260, clearDistance / Math.max(effectiveSpeed() * 60, 1) * 1000);
+      obstacle.actionExecuted = true;
+      duck(holdDuration);
+    }
+  }
+
+  function scheduleJevAction(obstacle) {
+    if (obstacle.actionExecuted) return;
+    if (obstacle.plannedAction && maneuverFitsObstacle(obstacle, obstacle.plannedAction)) {
+      executeScheduledAction(obstacle, obstacle.plannedAction);
+      return;
+    }
+
+    const safetyDecision = ruleDecision(obstacle);
+    const safetyAction = typeof safetyDecision === "string" ? safetyDecision : safetyDecision.action;
+    if (safetyAction === "continue") return;
+    obstacle.usedSafetyFallback = true;
+    obstacle.actionExecuted = true;
+    executeRuleDecision(obstacle);
+  }
+
   async function requestJevDecision(obstacle) {
-    if (!obstacle || pendingDecision || gameOver || paused) return;
+    if (!obstacle || obstacle.decisionRequested || pendingDecision || gameOver || paused) return;
     const requestSession = gameSession;
     const distance = Math.max(0, obstacle.x - (dino.x + dino.width));
-    const lookahead = 430 + effectiveSpeed() * 8;
-    if (distance > lookahead || obstacle.lastAskedDistance - distance < 52) return;
-    obstacle.lastAskedDistance = distance;
+    if (distance > PLANNING_LOOKAHEAD) return;
+    obstacle.decisionRequested = true;
     pendingDecision = true;
     const started = performance.now();
     const state = {
@@ -308,13 +357,15 @@
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const decision = await response.json();
       if (requestSession !== gameSession) return;
-      decision.latency_ms = decision.latency_ms || Math.round(performance.now() - started);
+      decision.api_latency_ms = decision.latency_ms;
+      decision.latency_ms = Math.round(performance.now() - started);
       showDecision(decision, state);
-      if (nearestObstacle()?.id === decision.obstacle_id) executeAction(decision.action);
+      const liveObstacle = obstacles.find(item => item.id === decision.obstacle_id);
+      if (!liveObstacle || gameOver || liveObstacle.actionExecuted) return;
+      liveObstacle.plannedAction = decision.action;
     } catch (error) {
       if (requestSession !== gameSession) return;
-      const rule = ruleDecision(obstacle);
-      const action = typeof rule === "string" ? rule : rule.action;
+      const action = defaultManeuver(obstacle);
       const fallback = {
         obstacle_id: obstacle.id,
         action,
@@ -329,7 +380,9 @@
         engine: "browser simulation"
       };
       showDecision(fallback, state);
-      if (nearestObstacle()?.id === obstacle.id) executeAction(action);
+      const liveObstacle = obstacles.find(item => item.id === obstacle.id);
+      if (!liveObstacle || gameOver || liveObstacle.actionExecuted) return;
+      liveObstacle.plannedAction = action;
     } finally {
       if (requestSession === gameSession) pendingDecision = false;
     }
@@ -370,7 +423,6 @@
 
   function addLog(action, confidence, latency) {
     logs.unshift({ time: timestamp(), action, confidence: Math.round(confidence * 100), latency });
-    logs = logs.slice(0, 8);
     renderLogs();
   }
 
@@ -421,7 +473,7 @@
   }
 
   function updateGame(delta) {
-    if (paused || gameOver) return;
+    if (paused || gameOver || awaitingStart) return;
     frame += delta;
     score += 0.12 * delta;
     const startingSpeed = BASE_SPEED * gameSpeed;
@@ -459,7 +511,10 @@
       els["state-obstacle"].textContent = nearest.type;
       els["state-distance"].textContent = `${Math.round(distance)} px`;
       if (mode === "rule") executeRuleDecision(nearest);
-      if (mode === "jev") requestJevDecision(nearest);
+      if (mode === "jev") {
+        requestJevDecision(nearest);
+        scheduleJevAction(nearest);
+      }
     } else {
       els["state-obstacle"].textContent = "none";
       els["state-distance"].textContent = "—";
@@ -487,7 +542,9 @@
   function endGame() {
     gameOver = true;
     playSound("crash");
+    els["game-over-label"].textContent = "RUN ENDED";
     els["final-score"].textContent = `Score ${Math.floor(score)}`;
+    els["try-again-button"].textContent = "Try again";
     els["game-over"].classList.remove("hidden");
     updateInputUI("continue");
   }
@@ -647,11 +704,11 @@
     if (!wasEnabled && soundEnabled) playSound("toggle");
   });
   els["pause-button"].addEventListener("click", () => {
-    if (gameOver) return;
+    if (gameOver || awaitingStart) return;
     paused = !paused;
     els["pause-button"].innerHTML = paused ? "▶ <span>Resume</span>" : "Ⅱ <span>Pause</span>";
   });
-  els["reset-button"].addEventListener("click", resetGame);
+  els["reset-button"].addEventListener("click", () => resetGame({ waitForStart: true }));
   els["try-again-button"].addEventListener("click", resetGame);
   els["clear-log"].addEventListener("click", clearDecisionHistory);
   window.addEventListener("keydown", event => {
