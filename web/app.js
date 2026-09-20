@@ -36,6 +36,7 @@
   let duckUntil = 0;
   let logs = [];
   let latencies = [];
+  let gameSession = 0;
   let engine = "connecting";
   let lastTimestamp = performance.now();
   let audioContext = null;
@@ -124,6 +125,7 @@
   }
 
   function resetGame() {
+    gameSession++;
     paused = false;
     gameOver = false;
     score = 0;
@@ -142,6 +144,7 @@
     dino.vy = 0;
     dino.onGround = true;
     dino.ducking = false;
+    clearDecisionHistory();
     els["game-over"].classList.add("hidden");
     els["pause-button"].innerHTML = "Ⅱ <span>Pause</span>";
     updateInputUI("continue");
@@ -275,6 +278,7 @@
 
   async function requestJevDecision(obstacle) {
     if (!obstacle || pendingDecision || gameOver || paused) return;
+    const requestSession = gameSession;
     const distance = Math.max(0, obstacle.x - (dino.x + dino.width));
     const lookahead = 430 + effectiveSpeed() * 8;
     if (distance > lookahead || obstacle.lastAskedDistance - distance < 52) return;
@@ -303,10 +307,12 @@
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const decision = await response.json();
+      if (requestSession !== gameSession) return;
       decision.latency_ms = decision.latency_ms || Math.round(performance.now() - started);
       showDecision(decision, state);
       if (nearestObstacle()?.id === decision.obstacle_id) executeAction(decision.action);
     } catch (error) {
+      if (requestSession !== gameSession) return;
       const rule = ruleDecision(obstacle);
       const action = typeof rule === "string" ? rule : rule.action;
       const fallback = {
@@ -325,7 +331,7 @@
       showDecision(fallback, state);
       if (nearestObstacle()?.id === obstacle.id) executeAction(action);
     } finally {
-      pendingDecision = false;
+      if (requestSession === gameSession) pendingDecision = false;
     }
   }
 
@@ -386,6 +392,13 @@
         <i class="log-dot"></i><span>${item.time}</span><strong class="log-action">${item.action.toUpperCase()}</strong>
         <span>${item.confidence}%</span><span>${item.latency} ms</span>
       </div>`).join("");
+  }
+
+  function clearDecisionHistory() {
+    logs = [];
+    latencies = [];
+    renderLogs();
+    updateMetrics();
   }
 
   function setEngineBadge() {
@@ -640,7 +653,7 @@
   });
   els["reset-button"].addEventListener("click", resetGame);
   els["try-again-button"].addEventListener("click", resetGame);
-  els["clear-log"].addEventListener("click", () => { logs = []; latencies = []; renderLogs(); updateMetrics(); });
+  els["clear-log"].addEventListener("click", clearDecisionHistory);
   window.addEventListener("keydown", event => {
     if (event.code === "Space" || event.code === "ArrowUp" || event.code === "ArrowDown") event.preventDefault();
     if (mode !== "human") return;
