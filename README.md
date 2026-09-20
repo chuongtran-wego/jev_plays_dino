@@ -77,24 +77,166 @@ The service binds to `127.0.0.1:8090` by default. To expose it to another machin
 
 The `1x`, `2x`, `4x`, and `8x` controls select the starting speed for the next run. Speed then increases gradually as the score grows, matching the original endless-runner behavior.
 
+## How the project works
+
+The application has three runtime layers:
+
+- **Browser (`web/`)** — owns the game loop, physics, obstacle generation, rendering, controls, decision timing, and the inspector UI. It asks for one AI plan per obstacle when that obstacle is within the 900 px planning window.
+- **Go server (`main.go`)** — embeds and serves the frontend, validates decision requests, rate-limits clients, selects the requested engine, and normalizes engine output into one response shape.
+- **Decision engine** — either the hosted Jev endpoint, the optional local Laya-MLX service, or the deterministic Go simulation used when `TYPESAFE_API_KEY` is empty.
+
+Human and Rule modes run entirely in the browser. Jev and Laya modes use the same browser-to-server API:
+
+```mermaid
+sequenceDiagram
+    participant Game as Browser game loop
+    participant Go as POST /api/decision
+    participant Engine as Jev or Laya-MLX
+
+    Game->>Game: Nearest obstacle enters 900 px lookahead
+    Game->>Go: Full game state + selected engine
+    Go->>Go: Rate limit and validate request
+    Go->>Engine: Minimal model state + typed question
+    Engine-->>Go: Choice, probabilities, confidence
+    Go-->>Game: Normalized decision response
+    Game->>Game: Record the plan and show telemetry
+    Game->>Game: Execute jump at <= 18 frames or duck at <= 25 frames
+```
+
+Planning and execution are deliberately separate. A returned `jump` or `duck` is stored on the live obstacle instead of being executed immediately. This gives the model enough network/inference time while preserving the late timing required by the game physics. Responses from a previous game session, responses for obstacles that no longer exist, and responses arriving after an action ran are displayed when appropriate but never executed.
+
+## Decision API
+
+### `POST /api/decision`
+
+The browser sends the selected engine and a snapshot of the nearest obstacle:
+
+```json
+{
+  "engine": "jev",
+  "speed": 8.42,
+  "score": 42,
+  "dino_state": "running",
+  "time_to_collision_ms": 855,
+  "obstacle": {
+    "id": "obstacle-7",
+    "type": "cactus_large",
+    "distance": 432,
+    "width": 36,
+    "height": 66,
+    "y": 324
+  }
+}
+```
+
+`engine` accepts `jev` or `laya`; an omitted value defaults to `jev`. The server requires a positive `speed` plus `obstacle.id` and `obstacle.type`. Request bodies are limited to 16 KiB and each client IP is limited to 180 requests per minute.
+
+A successful response has the same shape for every engine:
+
+```json
+{
+  "obstacle_id": "obstacle-7",
+  "action": "jump",
+  "probabilities": {
+    "jump": 0.93,
+    "duck": 0.01,
+    "continue": 0.06
+  },
+  "confidence": 0.93,
+  "latency_ms": 287,
+  "engine": "jev"
+}
+```
+
+Only `jump`, `duck`, and `continue` are valid actions. `latency_ms` in the API response is engine-side latency. The browser also measures end-to-end latency—from starting `fetch` through parsing the response—and uses that value in the UI and aggregate metrics.
+
+The server returns:
+
+- `400` for malformed input, missing game state, or an unknown engine.
+- `429` when the per-IP rate limit is exceeded.
+- `502` when the selected decision service fails or returns invalid data.
+
+If the browser receives an error, it labels the entry `API ERROR` and creates a local fallback plan: jump for a cactus, duck for `bird_low`, and continue otherwise. If no `TYPESAFE_API_KEY` is configured, the Go server instead serves a deterministic simulation response with `engine: "simulation"`; this is a normal successful response, not an error fallback.
+
+### `GET /api/health`
+
+This endpoint reports the engines available to the UI. Jev is reported as `jev` when an API key exists and `simulation` otherwise. Laya is reported as `laya-mlx` only when its `/health` endpoint responds successfully within 600 ms.
+
+## What is sent to the model
+
+The full browser request is useful for validation, UI telemetry, and matching the answer to an obstacle, but the model receives only the signals needed to choose a maneuver:
+
+```json
+{
+  "model": "jev-latest",
+  "state": {
+    "obstacle_type": "cactus_large",
+    "time_to_collision_ms": 855,
+    "dino_state": "running"
+  },
+  "questions": {
+    "next_action": {
+      "type": "choice",
+      "instructions": "Select the maneuver for this obstacle.",
+      "criteria": {
+        "jump": "Ground cactus.",
+        "duck": "Low bird.",
+        "continue": "High bird."
+      }
+    }
+  }
+}
+```
+
+This is a typed question rather than a free-form chat prompt:
+
+- `state` supplies the obstacle category, estimated collision time, and current dinosaur state.
+- `questions.next_action.type = "choice"` constrains the task to the named criteria.
+- `criteria` defines the meaning of each allowed choice: ground cactus → `jump`, low bird → `duck`, high bird → `continue`.
+- Jev returns `answers.next_action.choice`, a probability for each choice, and a confidence score. The Go server validates the choice and maps those fields to the public decision response.
+
+The Laya service constructs the same `state` and `questions` objects and passes them to `_agent.predict(...)`, so hosted and local inference solve the same typed task. Fields such as `score`, `speed`, obstacle dimensions, distance, and ID are not forwarded to either model. Timing still matters through the derived `time_to_collision_ms` value.
+
+### Engine-specific flow
+
+- **Jev with an API key:** Go sends `POST {TYPESAFE_BASE_URL}/v1/systemone` with bearer authentication and model `jev-latest`. The HTTP client timeout is 3 seconds. At startup, Go also sends an authenticated `HEAD` request to warm the connection.
+- **Jev without an API key:** Go waits about 90 ms and uses the deterministic `mockDecision` policy. Cacti map to `jump`, `bird_low` to `duck`, and `bird_high` to `continue`.
+- **Laya:** Go forwards the original decision state, without the `engine` field, to `POST {LAYA_BASE_URL}/v1/decision`. The Python service reduces it to the same minimal model state and serializes inference with a lock because one model instance is shared by concurrent HTTP requests.
+
 ## Project structure
 
 ```text
 .
-├── main.go          # Go server, TypeSafe client, and embedded web assets
-├── main_test.go     # Server and decision tests
-├── laya-server/     # Local Apple Silicon Laya-MLX HTTP service
-├── web/             # Canvas game and interface
-├── docs/            # Repository screenshots
-├── .env.example     # Local configuration template
-└── Dockerfile
+├── main.go                 # HTTP server, engine clients, API handlers, simulation, embedded web assets
+├── main_test.go            # Go API-client, validation, policy, rate-limit, and lifecycle tests
+├── web/
+│   ├── index.html          # Page structure and controls
+│   ├── app.js              # Game state, canvas rendering, physics, AI requests, and action scheduling
+│   ├── styles.css          # Responsive two-panel interface
+│   ├── app.test.js         # Browser behavior and layout regression tests
+│   └── favicon.svg
+├── laya-server/
+│   ├── server.py           # Persistent Laya-MLX model and local HTTP API
+│   ├── test_server.py      # Python service tests
+│   └── requirements.txt
+├── docs/                   # Screenshots and implementation notes
+├── .env.example            # Local configuration template
+├── Dockerfile              # Go application image; does not bundle Laya-MLX
+├── Makefile                # Common test and build targets
+├── package.json            # Vite and frontend test scripts
+└── vite.config.js
 ```
 
 ## Verify
 
 ```bash
-make test
+go test ./...
+npm test
+npm run build
+git diff --check
 ```
+
+`make test` is also available and runs the Go tests, a JavaScript syntax check, and the Python Laya service tests.
 
 ## Docker
 
