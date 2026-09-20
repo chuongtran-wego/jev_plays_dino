@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="A live decision-making demo where Jev AI plays a browser dinosaur game.">
+  <title>Jev Plays Dino</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">J</span>
+        <div>
+          <h1>JEV PLAYS DINO</h1>
+          <div class="live-status"><span class="live-dot"></span><span id="engine-label">AI AUTOPILOT</span></div>
+        </div>
+      </div>
+      <div class="top-actions">
+        <div class="mode-switch" role="group" aria-label="Game mode">
+          <button class="mode-button" data-mode="human">Human</button>
+          <button class="mode-button" data-mode="rule">Rule</button>
+          <button class="mode-button active" data-mode="jev">Jev</button>
+        </div>
+        <div class="speed-switch" role="group" aria-label="Starting speed">
+          <span>Start speed</span>
+          <button class="speed-button active" data-speed="1">1×</button>
+          <button class="speed-button" data-speed="2">2×</button>
+          <button class="speed-button" data-speed="3">3×</button>
+        </div>
+        <button id="sound-button" class="control-button" aria-label="Mute sound" title="Mute sound">♫ <span id="sound-label">Sound</span></button>
+        <button id="pause-button" class="control-button" aria-label="Pause game">Ⅱ <span>Pause</span></button>
+        <button id="reset-button" class="control-button" aria-label="Reset game">↻ <span>Reset</span></button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="game-column" aria-label="Dinosaur game">
+        <div class="game-panel">
+          <canvas id="game-canvas" width="960" height="500" aria-label="Dinosaur running game"></canvas>
+          <div class="game-badge"><span class="badge-dot"></span><span id="player-label">JEV IS PLAYING</span></div>
+          <div class="canvas-stats" aria-live="polite">
+            <span>SCORE <strong id="canvas-score">00000</strong></span>
+            <span>SPEED <strong id="canvas-speed">1.0×</strong></span>
+          </div>
+          <div id="game-over" class="game-over hidden">
+            <span class="eyebrow">RUN ENDED</span>
+            <strong id="final-score">Score 0</strong>
+            <button id="try-again-button">Try again</button>
+          </div>
+        </div>
+
+        <div class="key-row" aria-label="Current input">
+          <div id="jump-key" class="keycap">
+            <span class="key-symbol">↑</span>
+            <span>JUMP</span>
+          </div>
+          <div id="duck-key" class="keycap">
+            <span class="key-symbol">↓</span>
+            <span>DUCK</span>
+          </div>
+          <div class="running-state">
+            <span class="running-icon" aria-hidden="true">●</span>
+            <div><small>NO KEY PRESSED</small><strong id="input-state">RUNNING</strong></div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="inspector" aria-label="Jev decision inspector">
+        <div class="inspector-heading">
+          <h2>JEV DECISION</h2>
+          <span id="engine-badge" class="engine-badge">CONNECTING</span>
+        </div>
+
+        <section class="decision-card">
+          <strong id="decision-action" class="decision-action">CONTINUE</strong>
+          <div class="decision-meta">
+            <div><span>Confidence</span><strong id="confidence">—</strong></div>
+            <div><span>Latency</span><strong id="latency">—</strong></div>
+          </div>
+        </section>
+
+        <section class="probability-card" aria-label="Action probabilities">
+          <div class="probability-row">
+            <span>Jump</span><div class="bar"><i id="jump-bar"></i></div><strong id="jump-probability">0%</strong>
+          </div>
+          <div class="probability-row">
+            <span>Continue</span><div class="bar"><i id="continue-bar"></i></div><strong id="continue-probability">100%</strong>
+          </div>
+          <div class="probability-row">
+            <span>Duck</span><div class="bar"><i id="duck-bar"></i></div><strong id="duck-probability">0%</strong>
+          </div>
+        </section>
+
+        <section class="state-card" aria-label="Current game state">
+          <div><span>Obstacle</span><strong id="state-obstacle">none</strong></div>
+          <div><span>Distance</span><strong id="state-distance">—</strong></div>
+          <div><span>Speed</span><strong id="state-speed">6.0</strong></div>
+          <div><span>Collision risk</span><strong id="state-risk" class="risk-low">LOW</strong></div>
+        </section>
+
+        <section class="log-section">
+          <div class="section-title"><h3>DECISION LOG</h3><button id="clear-log">Clear</button></div>
+          <div id="decision-log" class="decision-log" aria-live="polite">
+            <div class="empty-log">Waiting for the first obstacle…</div>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="statusbar">
+      <span>Score <strong id="footer-score">0</strong></span>
+      <span>Obstacles passed <strong id="passed-count">0</strong></span>
+      <span>Avg latency <strong id="average-latency">—</strong></span>
+      <span>Decisions <strong id="decision-count">0</strong></span>
+      <span class="footer-note">AI PLAYS SO YOU CAN EXPLORE</span>
+    </footer>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
