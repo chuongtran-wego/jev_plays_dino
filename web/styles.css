@@ -74,8 +74,7 @@ button { font: inherit; }
 
 .top-actions { flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .control-group { gap: 10px; }
-.mode-switch { padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: #0e1518; }
-.speed-switch, .difficulty-switch { padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: #0e1518; }
+.mode-switch, .speed-switch, .difficulty-switch { padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: #0e1518; }
 .speed-switch > span, .difficulty-switch > span { padding: 0 8px; color: var(--muted); font: 650 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; letter-spacing: .06em; }
 .mode-button, .speed-button, .difficulty-button, .control-button, #try-again-button {
   min-height: 42px;
@@ -112,10 +111,11 @@ button { font: inherit; }
   background: var(--cream);
   box-shadow: 0 18px 50px rgba(0,0,0,.2);
 }
-#game-canvas { display: block; width: 100%; aspect-ratio: 960 / 250; }
+/* height: auto keeps the intrinsic ratio of the canvas bitmap, so app.js owns the 960:250 numbers. */
+#game-canvas { display: block; width: 100%; height: auto; }
 .game-badge, .canvas-stats { position: absolute; z-index: 2; }
-/* 80% = GROUND / HEIGHT in app.js, so the badge sits just under the ground line at every panel width. */
-.game-badge { left: 20px; top: calc(80% + 4px); display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 7px; color: #173123; background: rgba(82,245,154,.22); font: 700 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* --ground-line comes from sizeCanvas() in app.js, so the badge sits just under the ground line at every width. */
+.game-badge { left: 20px; top: calc(var(--ground-line) + 4px); display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 7px; color: #173123; background: rgba(82,245,154,.22); font: 700 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .canvas-stats { top: 20px; right: 24px; display: grid; gap: 5px; color: var(--ink); text-align: right; font: 700 15px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .canvas-stats strong { margin-left: 7px; font-size: 18px; }
 .game-over { position: absolute; inset: 0; z-index: 3; display: grid; place-content: center; gap: 12px; text-align: center; color: var(--ink); background: rgba(243,240,232,.88); backdrop-filter: blur(2px); }
@@ -206,8 +206,6 @@ button { font: inherit; }
   .mode-switch { flex: 1; }
   .speed-switch, .difficulty-switch { order: 3; }
   .mode-button { min-width: 0; flex: 1; padding: 0 10px; }
-  .control-button { padding: 0 12px; }
-  .control-button span { display: none; }
   .workspace { padding: 14px 12px; }
   .game-badge { padding: 5px 8px; font-size: 11px; }
   .key-row { min-height: 108px; grid-template-columns: 1fr 1fr; }

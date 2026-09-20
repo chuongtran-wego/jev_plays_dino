@@ -81,7 +81,7 @@ The `1x`, `2x`, `4x`, and `8x` controls select the starting speed for the next r
 The **Easy** and **Hard** controls select the difficulty for the next run:
 
 - **Easy** spawns one obstacle every 103 to 188 frames, so one single cactus or bird is on screen at a time.
-- **Hard** spawns a wave every 55 to 80 frames. A wave is a single cactus, a clump of two or three cacti, or a bird. Seven in ten cactus waves add a trailing cactus at a gap the dinosaur clears in the same jump, so two obstacles share the screen at every speed preset. Clumps of three appear once the speed reaches 7. The wave gap is measured in frames, so the spacing grows with speed while the jump arc stays clearable.
+- **Hard** spawns a wave every 55 to 80 frames. A wave is a single cactus, a clump of two or three cacti, or a bird. Seven in ten cactus waves add a trailing cactus at a gap the dinosaur clears in the same jump, so two obstacles share the screen at every speed preset. Clumps grow as speed stretches the jump arc, up to three cacti. The wave gap is measured in frames, so the spacing grows with speed while the jump arc stays clearable.
 
 ## How the project works
 

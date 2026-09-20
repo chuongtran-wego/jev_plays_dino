@@ -147,22 +147,57 @@ test("game speed presets are 1x, 2x, 4x, and 8x", () => {
   assert.match(app, /\[1, 2, 4, 8\]\.includes\(multiplier\)/);
 });
 
-test("game canvas keeps a wide fixed aspect ratio instead of stretching to the panel", () => {
-  const canvasRule = cssRule("#game-canvas");
-  const [, width, height] = html.match(/<canvas id="game-canvas" width="(\d+)" height="(\d+)"/).map(Number);
+function constant(name) {
+  return Number(app.match(new RegExp(`const ${name} = (-?[\\d.]+);`))?.[1]);
+}
 
-  assert.match(canvasRule, new RegExp(`aspect-ratio:\\s*${width}\\s*/\\s*${height}\\b`));
-  assert.doesNotMatch(canvasRule, /height:\s*100%/);
-  assert.doesNotMatch(canvasRule, /min-height/);
+function objectLiteral(name) {
+  const source = app.match(new RegExp(`${name}(?: =|:)\\s*\\{([^}]+)\\}`))?.[1] || "";
+  return Object.fromEntries([...source.matchAll(/(\w+):\s*(-?[\d.]+)/g)].map(match => [match[1], Number(match[2])]));
+}
+
+function canvasAttributes() {
+  return html.match(/<canvas id="game-canvas" width="(\d+)" height="(\d+)"/).slice(1).map(Number);
+}
+
+function obstacleSize(type) {
+  return app.match(new RegExp(`${type}: \\[(\\d+), (\\d+)\\]`)).slice(1).map(Number);
+}
+
+const dinoSprite = objectLiteral("const dino");
+const standingHitbox = objectLiteral("standing");
+const obstacleInset = objectLiteral("OBSTACLE_HITBOX_INSET");
+
+// Mirrors HITBOX_OVERLAP_EXTRA: run-in plus run-out of the standing hitbox around an obstacle.
+function hitboxOverlapExtra() {
+  return 2 * dinoSprite.width - 2 * standingHitbox.left - standingHitbox.width;
+}
+
+// Mirrors arcWindowFrames(): frames the standing hitbox stays above a cactus of this height.
+function arcWindowFrames(height) {
+  const gravity = constant("GRAVITY");
+  const clearance = height - obstacleInset.top - (dinoSprite.height - standingHitbox.top - standingHitbox.height);
+  return 2 * Math.sqrt(constant("JUMP_VELOCITY") ** 2 - 2 * gravity * clearance) / gravity;
+}
+
+// Mirrors jumpSpanLimit(): widest obstacle span one jump clears at this speed.
+function jumpSpanLimit(height, speed) {
+  return (arcWindowFrames(height) - 2 * constant("ARC_MARGIN_FRAMES")) * speed - hitboxOverlapExtra();
+}
+
+test("game canvas keeps its intrinsic wide ratio instead of stretching to the panel", () => {
+  const canvasRule = cssRule("#game-canvas");
+  const [width, height] = canvasAttributes();
+
+  assert.match(canvasRule, /height:\s*auto\b/);
+  assert.doesNotMatch(canvasRule, /height:\s*100%|min-height|aspect-ratio/);
   assert.doesNotMatch(styles, /\.game-panel[^{]*\{[^}]*(min-height|flex:\s*1)/);
   assert.ok(width / height >= 3.5, "canvas should stay close to the 4:1 strip of the Chrome game");
 });
 
 test("canvas constants match the markup and keep the scene inside the frame", () => {
-  const constant = name => Number(app.match(new RegExp(`const ${name} = (-?[\\d.]+);`))?.[1]);
-  const [, width, height] = html.match(/<canvas id="game-canvas" width="(\d+)" height="(\d+)"/).map(Number);
-  const dinoHeight = Number(app.match(/const dino = \{[^}]*height: (\d+)/)?.[1]);
-  const jumpApex = constant("GROUND") - dinoHeight - constant("JUMP_VELOCITY") ** 2 / (2 * constant("GRAVITY"));
+  const [width, height] = canvasAttributes();
+  const jumpApex = constant("GROUND") - dinoSprite.height - constant("JUMP_VELOCITY") ** 2 / (2 * constant("GRAVITY"));
   // drawGround places its lowest dots at GROUND + 35 with a 3 px height.
   const groundTextureDepth = 38;
 
@@ -170,7 +205,8 @@ test("canvas constants match the markup and keep the scene inside the frame", ()
   assert.equal(constant("HEIGHT"), height);
   assert.ok(jumpApex >= 0, `jump apex at y=${jumpApex} is clipped by the top edge`);
   assert.ok(constant("GROUND") + groundTextureDepth <= height, "ground texture is clipped by the bottom edge");
-  assert.match(cssRule(".game-badge"), new RegExp(`top:\\s*calc\\(${Math.round(constant("GROUND") / height * 100)}% \\+ \\d+px\\)`));
+  assert.match(cssRule(".game-badge"), /top:\s*calc\(var\(--ground-line\) \+ \d+px\)/);
+  assert.match(app, /"--ground-line", `\$\{\(GROUND \/ HEIGHT \* 100\)/);
   assert.match(app, /drawCloud\([^,]+, GROUND - \d+, [\d.]+\)/);
   assert.doesNotMatch(app, /drawCloud\([^,]+, \d+, [\d.]+\)/);
 });
@@ -178,21 +214,13 @@ test("canvas constants match the markup and keep the scene inside the frame", ()
 test("canvas renders at device pixel ratio while CSS owns the displayed size", () => {
   const sizeCanvas = app.match(/function sizeCanvas\(\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
 
-  assert.match(sizeCanvas, /canvas\.width = Math\.round\(WIDTH \* dpr\)/);
-  assert.match(sizeCanvas, /canvas\.height = Math\.round\(HEIGHT \* dpr\)/);
+  assert.match(sizeCanvas, /canvas\.width = width;/);
+  assert.match(sizeCanvas, /canvas\.height = height;/);
+  assert.match(sizeCanvas, /if \(canvas\.width === width && canvas\.height === height\) return;/);
   assert.match(sizeCanvas, /ctx\.setTransform\(dpr, 0, 0, dpr, 0, 0\)/);
   assert.match(app, /window\.addEventListener\("resize", sizeCanvas\)/);
   assert.ok(app.indexOf("sizeCanvas();") < app.indexOf("requestAnimationFrame(loop);\n})();"));
 });
-
-function constant(name) {
-  return Number(app.match(new RegExp(`const ${name} = (-?[\\d.]+);`))?.[1]);
-}
-
-function difficultyPreset(level) {
-  const source = app.match(new RegExp(`${level}: \\{([^}]+)\\}`))?.[1] || "";
-  return Object.fromEntries([...source.matchAll(/(\w+):\s*(-?[\d.]+)/g)].map(match => [match[1], Number(match[2])]));
-}
 
 test("difficulty switch offers easy and hard with easy as the default", () => {
   assert.match(html, /class="difficulty-button active" data-difficulty="easy">Easy</);
@@ -203,30 +231,38 @@ test("difficulty switch offers easy and hard with easy as the default", () => {
   assert.match(app, /function setDifficulty\(level\)\s*\{[\s\S]*?resetGame\(\);\n  \}/);
 });
 
-test("hard mode spawns cactus clumps of up to three while easy keeps single cacti", () => {
-  const spawnObstacle = app.match(/function spawnObstacle\([^\n]*\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
-
-  assert.equal(difficultyPreset("easy").cactusGroupMax, 1);
-  assert.equal(difficultyPreset("hard").cactusGroupMax, 3);
-  assert.match(spawnObstacle, /const size = isBird \? 1 : count \|\| cactusGroupSize\(\);/);
-  assert.match(spawnObstacle, /width: unitWidth \* size \+ CACTUS_GROUP_GAP \* \(size - 1\)/);
-  assert.match(app, /speed >= CACTUS_TRIPLE_MIN_SPEED \? 3 : 2/);
-  assert.match(app, /for \(let i = 0; i < obstacle\.count; i\+\+\)/);
+test("difficulty presets hold the tuning and hard keeps single cacti out of easy", () => {
+  assert.deepEqual(objectLiteral("easy"), { cactusGroupMax: 1, pairChance: 0, gapMin: 115, gapRange: 85, gapSpeedPenalty: 2 });
+  assert.deepEqual(objectLiteral("hard"), { cactusGroupMax: 3, pairChance: 0.7, gapMin: 55, gapRange: 25, gapSpeedPenalty: 0 });
+  assert.match(app, /nextSpawn = frame \+ spawnGapFrames\(\);/);
   assert.match(app, /count: obstacle\.count,/);
 });
 
-test("hard mode spacing keeps two obstacles in view yet leaves room to land between them", () => {
-  const easy = difficultyPreset("easy");
-  const hard = difficultyPreset("hard");
-  const airtimeFrames = 2 * -constant("JUMP_VELOCITY") / constant("GRAVITY");
+test("cactus clump size is derived from what the jump arc can clear", () => {
+  const cactusGroupSize = app.match(/function cactusGroupSize\(type\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+  const [largeWidth, largeHeight] = obstacleSize("cactus_large");
+  const gap = constant("CACTUS_GROUP_GAP");
+  const tripleWidth = 3 * largeWidth + 2 * gap;
+
+  assert.match(cactusGroupSize, /DIFFICULTY\[difficulty\]\.cactusGroupMax/);
+  assert.match(cactusGroupSize, /> jumpSpanLimit\(height\)\) maxCount--;/);
+  assert.doesNotMatch(app, /CACTUS_TRIPLE_MIN_SPEED/);
+  assert.ok(tripleWidth <= jumpSpanLimit(largeHeight, constant("BASE_SPEED") * 2), "a triple large clump must fit the arc at the 2x preset");
+  assert.ok(tripleWidth > jumpSpanLimit(largeHeight, constant("BASE_SPEED") * 0.5), "the arc limit must actually gate clumps at low speed");
+  assert.match(app, /for \(let i = 0; i < obstacle\.count; i\+\+\)/);
+});
+
+test("hard mode spacing keeps two waves in view yet leaves room to land between them", () => {
+  const hard = objectLiteral("hard");
+  const apex = -constant("JUMP_VELOCITY") / constant("GRAVITY");
+  const airtimeFrames = 2 * apex;
+  const [, largeHeight] = obstacleSize("cactus_large");
+  // A paired lead is jumped with the shortest lead the arc allows; the next wave may need the longest.
+  const shortestLead = apex - (arcWindowFrames(largeHeight) - 2 * constant("ARC_MARGIN_FRAMES")) / 2;
   const topPresetSpeed = constant("BASE_SPEED") + constant("MAX_SPEED_GAIN");
 
-  assert.deepEqual(easy, { cactusGroupMax: 1, pairChance: 0, gapMin: 115, gapRange: 85, gapSpeedPenalty: 2 });
-  assert.equal(hard.gapSpeedPenalty, 0);
-  // A paired lead is jumped early (about 6 frames of lead), so the next wave needs the full arc plus a normal lead.
-  assert.ok(hard.gapMin >= airtimeFrames - 6 + 18, "hard wave gap must let the dinosaur land and take off again");
+  assert.ok(hard.gapMin >= airtimeFrames - shortestLead + apex, "hard wave gap must let the dinosaur land and take off again");
   assert.ok((hard.gapMin + hard.gapRange) * topPresetSpeed <= constant("WIDTH"), "hard wave gap must keep two waves on screen at the 1x preset");
-  assert.match(app, /nextSpawn = frame \+ spawnGapFrames\(\);/);
 });
 
 test("jump lead centres the arc over the obstacle for both the rule bot and scheduled plans", () => {
@@ -237,48 +273,29 @@ test("jump lead centres the arc over the obstacle for both the rule bot and sche
   assert.match(scheduled, /framesToCollision <= jumpLeadFrames\(obstacle\)/);
   assert.doesNotMatch(ruleDecision + scheduled, /framesToCollision <= 18/);
   assert.match(app, /const JUMP_APEX_FRAMES = -JUMP_VELOCITY \/ GRAVITY;/);
+  assert.match(app, /const overlapPx = obstacle\.jumpSpan \+ HITBOX_OVERLAP_EXTRA;/);
 });
 
-test("the widest hard clump clears the jump arc at its minimum spawn speed", () => {
-  const gravity = constant("GRAVITY");
-  const velocity = -constant("JUMP_VELOCITY");
-  const [unitWidth, height] = app.match(/cactus_large: \[(\d+), (\d+)\]/).slice(1).map(Number);
-  const width = 3 * unitWidth + 2 * constant("CACTUS_GROUP_GAP");
-  const speed = constant("CACTUS_TRIPLE_MIN_SPEED");
-  // The standing hitbox clears the cactus hitbox once the dinosaur is more than height - 5 px up.
-  const clearance = height - 5;
-  const root = Math.sqrt(velocity ** 2 - 2 * gravity * clearance);
-  const aboveCactusFrames = 2 * root / gravity;
-  const overlapFrames = (width + 45) / speed;
+test("hard mode pairs a trailing cactus inside one jump so two obstacles share the screen at every preset", () => {
+  const spawnWave = app.match(/function spawnWave\(\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+  const [largeWidth, largeHeight] = obstacleSize("cactus_large");
+  const gapCap = constant("PAIR_GAP_MAX_SHARE") * constant("WIDTH");
 
-  assert.ok(aboveCactusFrames - overlapFrames >= 4, `only ${(aboveCactusFrames - overlapFrames).toFixed(1)} frames of margin`);
+  assert.match(spawnWave, /if \(lead\.isBird \|\| Math\.random\(\) >= DIFFICULTY\[difficulty\]\.pairChance\) return;/);
+  assert.match(spawnWave, /if \(gapMax < PAIR_GAP_MIN\) return;/);
+  assert.match(spawnWave, /spawnObstacle\(\{ type, count: 1, x: lead\.x \+ lead\.width \+ gap \}\)/);
+  assert.match(spawnWave, /lead\.jumpSpan = lead\.width \+ gap \+ trailing\.width;/);
+  assert.match(app, /jumpSpan: width,/);
+  for (const multiplier of [1, 2, 4, 8]) {
+    const speed = constant("BASE_SPEED") * multiplier;
+    const gapMax = Math.min(jumpSpanLimit(largeHeight, speed) - 2 * largeWidth, gapCap);
+    assert.ok(gapMax >= constant("PAIR_GAP_MIN"), `two large cacti cannot pair at the ${multiplier}x preset (gap ${gapMax.toFixed(0)} px)`);
+    assert.ok(2 * largeWidth + gapMax + constant("DINO_X") < constant("WIDTH"), `a pair does not fit on screen at ${multiplier}x`);
+  }
 });
 
 test("AI plans are requested for every obstacle inside the lookahead, not just the nearest", () => {
   assert.match(app, /function nextUnplannedObstacle\(\)/);
   assert.match(app, /requestJevDecision\(nextUnplannedObstacle\(\)\);/);
   assert.match(app, /scheduleJevAction\(nearest\);/);
-});
-
-test("hard mode pairs a trailing cactus inside one jump so two obstacles share the screen at every preset", () => {
-  const spawnWave = app.match(/function spawnWave\(\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
-  const gravity = constant("GRAVITY");
-  const velocity = -constant("JUMP_VELOCITY");
-  const [largeWidth, largeHeight] = app.match(/cactus_large: \[(\d+), (\d+)\]/).slice(1).map(Number);
-  const arcWindow = 2 * Math.sqrt(velocity ** 2 - 2 * gravity * (largeHeight - 5)) / gravity;
-  const usableFrames = arcWindow - 2 * constant("ARC_MARGIN_FRAMES");
-  const gapCap = constant("PAIR_GAP_MAX_SHARE") * constant("WIDTH");
-
-  assert.equal(difficultyPreset("hard").pairChance, 0.7);
-  assert.match(spawnWave, /if \(lead\.isBird \|\| Math\.random\(\) >= DIFFICULTY\[difficulty\]\.pairChance\) return;/);
-  assert.match(spawnWave, /if \(gapMax < PAIR_GAP_MIN\) return;/);
-  assert.match(spawnWave, /spawnObstacle\(\{ type, count: 1, x: lead\.x \+ lead\.width \+ gap \}\)/);
-  assert.match(spawnWave, /lead\.jumpSpan = lead\.width \+ gap \+ trailing\.width;/);
-  assert.match(app, /const overlapPx = \(obstacle\.jumpSpan \|\| obstacle\.width\) \+ hitboxOverlapExtra\(\);/);
-  for (const multiplier of [1, 2, 4, 8]) {
-    const speed = constant("BASE_SPEED") * multiplier;
-    const gapMax = Math.min(usableFrames * speed - 45 - 2 * largeWidth, gapCap);
-    assert.ok(gapMax >= constant("PAIR_GAP_MIN"), `two large cacti cannot pair at the ${multiplier}x preset (gap ${gapMax.toFixed(0)} px)`);
-    assert.ok(2 * largeWidth + gapMax + constant("DINO_X") < constant("WIDTH"), `a pair does not fit on screen at ${multiplier}x`);
-  }
 });
