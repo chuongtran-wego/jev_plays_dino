@@ -145,3 +145,41 @@ test("game speed presets are 1x, 2x, 4x, and 8x", () => {
   assert.deepEqual(speedButtons, [1, 2, 4, 8]);
   assert.match(app, /\[1, 2, 4, 8\]\.includes\(multiplier\)/);
 });
+
+test("game canvas keeps a wide fixed aspect ratio instead of stretching to the panel", () => {
+  const canvasRule = cssRule("#game-canvas");
+  const [, width, height] = html.match(/<canvas id="game-canvas" width="(\d+)" height="(\d+)"/).map(Number);
+
+  assert.match(canvasRule, new RegExp(`aspect-ratio:\\s*${width}\\s*/\\s*${height}\\b`));
+  assert.doesNotMatch(canvasRule, /height:\s*100%/);
+  assert.doesNotMatch(canvasRule, /min-height/);
+  assert.doesNotMatch(styles, /\.game-panel[^{]*\{[^}]*(min-height|flex:\s*1)/);
+  assert.ok(width / height >= 3.5, "canvas should stay close to the 4:1 strip of the Chrome game");
+});
+
+test("canvas constants match the markup and keep the scene inside the frame", () => {
+  const constant = name => Number(app.match(new RegExp(`const ${name} = (-?[\\d.]+);`))?.[1]);
+  const [, width, height] = html.match(/<canvas id="game-canvas" width="(\d+)" height="(\d+)"/).map(Number);
+  const dinoHeight = Number(app.match(/const dino = \{[^}]*height: (\d+)/)?.[1]);
+  const jumpApex = constant("GROUND") - dinoHeight - constant("JUMP_VELOCITY") ** 2 / (2 * constant("GRAVITY"));
+  // drawGround places its lowest dots at GROUND + 35 with a 3 px height.
+  const groundTextureDepth = 38;
+
+  assert.equal(constant("WIDTH"), width);
+  assert.equal(constant("HEIGHT"), height);
+  assert.ok(jumpApex >= 0, `jump apex at y=${jumpApex} is clipped by the top edge`);
+  assert.ok(constant("GROUND") + groundTextureDepth <= height, "ground texture is clipped by the bottom edge");
+  assert.match(cssRule(".game-badge"), new RegExp(`top:\\s*calc\\(${Math.round(constant("GROUND") / height * 100)}% \\+ \\d+px\\)`));
+  assert.match(app, /drawCloud\([^,]+, GROUND - \d+, [\d.]+\)/);
+  assert.doesNotMatch(app, /drawCloud\([^,]+, \d+, [\d.]+\)/);
+});
+
+test("canvas renders at device pixel ratio while CSS owns the displayed size", () => {
+  const sizeCanvas = app.match(/function sizeCanvas\(\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+
+  assert.match(sizeCanvas, /canvas\.width = Math\.round\(WIDTH \* dpr\)/);
+  assert.match(sizeCanvas, /canvas\.height = Math\.round\(HEIGHT \* dpr\)/);
+  assert.match(sizeCanvas, /ctx\.setTransform\(dpr, 0, 0, dpr, 0, 0\)/);
+  assert.match(app, /window\.addEventListener\("resize", sizeCanvas\)/);
+  assert.ok(app.indexOf("sizeCanvas();") < app.indexOf("requestAnimationFrame(loop);\n})();"));
+});

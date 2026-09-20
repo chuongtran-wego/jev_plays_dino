@@ -13,8 +13,8 @@
   ].map(id => [id, document.getElementById(id)]));
 
   const WIDTH = 960;
-  const HEIGHT = 500;
-  const GROUND = 390;
+  const HEIGHT = 250;
+  const GROUND = 200;
   const DINO_X = 108;
   const BASE_SPEED = 6;
   const MAX_SPEED_GAIN = 5.5;
@@ -566,13 +566,22 @@
     els["average-latency"].textContent = average === null ? "—" : `${average} ms`;
   }
 
+  function sizeCanvas() {
+    // Render at device resolution so pixel-art edges stay crisp on HiDPI screens.
+    // The CSS aspect-ratio owns the displayed size.
+    const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+    canvas.width = Math.round(WIDTH * dpr);
+    canvas.height = Math.round(HEIGHT * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
   function draw() {
     ctx.clearRect(0, 0, WIDTH, HEIGHT);
     ctx.fillStyle = "#f3f0e8";
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
-    drawCloud(180 - frame * .12 % 1100, 142, 1);
-    drawCloud(660 - frame * .08 % 1200, 105, .82);
-    drawCloud(870 - frame * .14 % 1300, 205, .65);
+    drawCloud(180 - frame * .12 % 1100, GROUND - 150, 1);
+    drawCloud(660 - frame * .08 % 1200, GROUND - 175, .82);
+    drawCloud(870 - frame * .14 % 1300, GROUND - 120, .65);
     drawGround();
     const nearest = nearestObstacle();
     if ((mode === "jev" || mode === "laya") && nearest && nearest.x < 570) drawSensing(nearest);
@@ -730,11 +739,14 @@
     }
   });
 
+  window.addEventListener("resize", sizeCanvas);
+
   document.addEventListener("pointerdown", unlockAudio, { once: true });
   document.addEventListener("keydown", unlockAudio, { once: true });
 
   loadEngineStatus();
   updateSoundButton();
   resetGame();
+  sizeCanvas();
   requestAnimationFrame(loop);
 })();

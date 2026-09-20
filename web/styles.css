@@ -102,21 +102,20 @@ button { font: inherit; }
   padding: 20px 28px;
 }
 
-.game-column { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 16px; }
+.game-column { min-width: 0; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 16px; }
 .game-panel {
   position: relative;
-  min-height: 420px;
-  flex: 1;
   overflow: hidden;
   border: 1px solid #414b4b;
   border-radius: 10px;
   background: var(--cream);
   box-shadow: 0 18px 50px rgba(0,0,0,.2);
 }
-#game-canvas { display: block; width: 100%; height: 100%; min-height: 420px; }
-.game-badge, .canvas-stats { position: absolute; top: 20px; z-index: 2; }
-.game-badge { left: 20px; display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 7px; color: #173123; background: rgba(82,245,154,.22); font: 700 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.canvas-stats { right: 24px; display: grid; gap: 5px; color: var(--ink); text-align: right; font: 700 15px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+#game-canvas { display: block; width: 100%; aspect-ratio: 960 / 250; }
+.game-badge, .canvas-stats { position: absolute; z-index: 2; }
+/* 80% = GROUND / HEIGHT in app.js, so the badge sits just under the ground line at every panel width. */
+.game-badge { left: 20px; top: calc(80% + 4px); display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 7px; color: #173123; background: rgba(82,245,154,.22); font: 700 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.canvas-stats { top: 20px; right: 24px; display: grid; gap: 5px; color: var(--ink); text-align: right; font: 700 15px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .canvas-stats strong { margin-left: 7px; font-size: 18px; }
 .game-over { position: absolute; inset: 0; z-index: 3; display: grid; place-content: center; gap: 12px; text-align: center; color: var(--ink); background: rgba(243,240,232,.88); backdrop-filter: blur(2px); }
 .game-over.hidden { display: none; }
@@ -192,7 +191,6 @@ button { font: inherit; }
   .app-shell { height: auto; min-height: 100vh; overflow: visible; }
   .workspace { min-height: auto; overflow: visible; grid-template-columns: 1fr; }
   .inspector { height: min(760px, calc(100dvh - 28px)); min-height: 640px; }
-  .game-panel { min-height: 480px; }
 }
 
 @media (max-width: 720px) {
@@ -205,13 +203,19 @@ button { font: inherit; }
   .control-button { padding: 0 12px; }
   .control-button span { display: none; }
   .workspace { padding: 14px 12px; }
-  .game-panel, #game-canvas { min-height: 360px; }
+  .game-badge { padding: 5px 8px; font-size: 11px; }
   .key-row { min-height: 108px; grid-template-columns: 1fr 1fr; }
   .running-state { grid-column: 1 / -1; min-height: 72px; }
   .decision-card { align-items: flex-start; flex-direction: column; }
   .decision-meta { width: 100%; }
   .statusbar { flex-wrap: wrap; gap: 10px 18px; padding: 12px 16px; }
   .footer-note { display: none; }
+}
+
+@media (max-width: 480px) {
+  .game-badge { display: none; }
+  .canvas-stats { top: 8px; right: 10px; gap: 2px; font-size: 11px; }
+  .canvas-stats strong { margin-left: 4px; font-size: 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
