@@ -55,11 +55,12 @@ test("starting a game clears decision history", () => {
 
 test("try again lets the first obstacle enter from beyond the right edge", () => {
   const resetGame = app.match(/function resetGame\([^)]*\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
-  const spawnObstacle = app.match(/function spawnObstacle\(\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+  const spawnObstacle = app.match(/function spawnObstacle\([^\n]*\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
 
-  assert.match(resetGame, /spawnObstacle\(\)/);
+  assert.match(resetGame, /spawnWave\(\)/);
   assert.doesNotMatch(resetGame, /obstacles\[0\]\.x\s*=/);
-  assert.match(spawnObstacle, /x:\s*WIDTH \+ 20/);
+  assert.match(app, /function spawnObstacle\(\{[^}]*x = WIDTH \+ 20/);
+  assert.match(spawnObstacle, /type, x, y,/);
 });
 
 test("reset enters a waiting state until Start again is clicked", () => {
@@ -203,12 +204,12 @@ test("difficulty switch offers easy and hard with easy as the default", () => {
 });
 
 test("hard mode spawns cactus clumps of up to three while easy keeps single cacti", () => {
-  const spawnObstacle = app.match(/function spawnObstacle\(\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+  const spawnObstacle = app.match(/function spawnObstacle\([^\n]*\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
 
   assert.equal(difficultyPreset("easy").cactusGroupMax, 1);
   assert.equal(difficultyPreset("hard").cactusGroupMax, 3);
-  assert.match(spawnObstacle, /const count = isBird \? 1 : cactusGroupSize\(\);/);
-  assert.match(spawnObstacle, /width: unitWidth \* count \+ CACTUS_GROUP_GAP \* \(count - 1\)/);
+  assert.match(spawnObstacle, /const size = isBird \? 1 : count \|\| cactusGroupSize\(\);/);
+  assert.match(spawnObstacle, /width: unitWidth \* size \+ CACTUS_GROUP_GAP \* \(size - 1\)/);
   assert.match(app, /speed >= CACTUS_TRIPLE_MIN_SPEED \? 3 : 2/);
   assert.match(app, /for \(let i = 0; i < obstacle\.count; i\+\+\)/);
   assert.match(app, /count: obstacle\.count,/);
@@ -220,10 +221,11 @@ test("hard mode spacing keeps two obstacles in view yet leaves room to land betw
   const airtimeFrames = 2 * -constant("JUMP_VELOCITY") / constant("GRAVITY");
   const topPresetSpeed = constant("BASE_SPEED") + constant("MAX_SPEED_GAIN");
 
-  assert.deepEqual(easy, { cactusGroupMax: 1, gapMin: 115, gapRange: 85, gapSpeedPenalty: 2 });
+  assert.deepEqual(easy, { cactusGroupMax: 1, pairChance: 0, gapMin: 115, gapRange: 85, gapSpeedPenalty: 2 });
   assert.equal(hard.gapSpeedPenalty, 0);
-  assert.ok(hard.gapMin >= airtimeFrames + 5, "hard gap must cover the full jump arc plus a landing margin");
-  assert.ok((hard.gapMin + hard.gapRange) * topPresetSpeed <= constant("WIDTH"), "hard gap must keep two obstacles on screen at the 1x preset");
+  // A paired lead is jumped early (about 6 frames of lead), so the next wave needs the full arc plus a normal lead.
+  assert.ok(hard.gapMin >= airtimeFrames - 6 + 18, "hard wave gap must let the dinosaur land and take off again");
+  assert.ok((hard.gapMin + hard.gapRange) * topPresetSpeed <= constant("WIDTH"), "hard wave gap must keep two waves on screen at the 1x preset");
   assert.match(app, /nextSpawn = frame \+ spawnGapFrames\(\);/);
 });
 
@@ -256,4 +258,27 @@ test("AI plans are requested for every obstacle inside the lookahead, not just t
   assert.match(app, /function nextUnplannedObstacle\(\)/);
   assert.match(app, /requestJevDecision\(nextUnplannedObstacle\(\)\);/);
   assert.match(app, /scheduleJevAction\(nearest\);/);
+});
+
+test("hard mode pairs a trailing cactus inside one jump so two obstacles share the screen at every preset", () => {
+  const spawnWave = app.match(/function spawnWave\(\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+  const gravity = constant("GRAVITY");
+  const velocity = -constant("JUMP_VELOCITY");
+  const [largeWidth, largeHeight] = app.match(/cactus_large: \[(\d+), (\d+)\]/).slice(1).map(Number);
+  const arcWindow = 2 * Math.sqrt(velocity ** 2 - 2 * gravity * (largeHeight - 5)) / gravity;
+  const usableFrames = arcWindow - 2 * constant("ARC_MARGIN_FRAMES");
+  const gapCap = constant("PAIR_GAP_MAX_SHARE") * constant("WIDTH");
+
+  assert.equal(difficultyPreset("hard").pairChance, 0.7);
+  assert.match(spawnWave, /if \(lead\.isBird \|\| Math\.random\(\) >= DIFFICULTY\[difficulty\]\.pairChance\) return;/);
+  assert.match(spawnWave, /if \(gapMax < PAIR_GAP_MIN\) return;/);
+  assert.match(spawnWave, /spawnObstacle\(\{ type, count: 1, x: lead\.x \+ lead\.width \+ gap \}\)/);
+  assert.match(spawnWave, /lead\.jumpSpan = lead\.width \+ gap \+ trailing\.width;/);
+  assert.match(app, /const overlapPx = \(obstacle\.jumpSpan \|\| obstacle\.width\) \+ hitboxOverlapExtra\(\);/);
+  for (const multiplier of [1, 2, 4, 8]) {
+    const speed = constant("BASE_SPEED") * multiplier;
+    const gapMax = Math.min(usableFrames * speed - 45 - 2 * largeWidth, gapCap);
+    assert.ok(gapMax >= constant("PAIR_GAP_MIN"), `two large cacti cannot pair at the ${multiplier}x preset (gap ${gapMax.toFixed(0)} px)`);
+    assert.ok(2 * largeWidth + gapMax + constant("DINO_X") < constant("WIDTH"), `a pair does not fit on screen at ${multiplier}x`);
+  }
 });

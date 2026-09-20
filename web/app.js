@@ -23,15 +23,20 @@
   const PLANNING_LOOKAHEAD = 900;
   // Frames from take-off to the top of the arc; the arc is symmetric around it.
   const JUMP_APEX_FRAMES = -JUMP_VELOCITY / GRAVITY;
-  const DINO_HITBOX = { left: 8, width: 35 };
+  const DINO_HITBOX = { left: 8, width: 35, top: 7, height: 47 };
+  const OBSTACLE_HITBOX_INSET = { x: 4, y: 3 };
   const OBSTACLE_SIZES = { cactus_large: [36, 66], cactus_small: [25, 46], bird: [52, 30] };
   const CACTUS_GROUP_GAP = 2;
   // Triple clumps need a longer arc window, so they wait for speed to build like the Chrome game.
   const CACTUS_TRIPLE_MIN_SPEED = 7;
-  // Spawn gaps are in frames: spacing then scales with speed while the fixed-length jump arc stays clearable.
+  // A paired cactus trails the lead by a gap the same jump clears; the gap is capped so both stay on screen.
+  const PAIR_GAP_MIN = 28;
+  const PAIR_GAP_MAX_SHARE = 0.35;
+  const ARC_MARGIN_FRAMES = 1.5;
+  // Wave gaps are in frames: spacing then scales with speed while the fixed-length jump arc stays clearable.
   const DIFFICULTY = {
-    easy: { cactusGroupMax: 1, gapMin: 115, gapRange: 85, gapSpeedPenalty: 2 },
-    hard: { cactusGroupMax: 3, gapMin: 50, gapRange: 30, gapSpeedPenalty: 0 }
+    easy: { cactusGroupMax: 1, pairChance: 0, gapMin: 115, gapRange: 85, gapSpeedPenalty: 2 },
+    hard: { cactusGroupMax: 3, pairChance: 0.7, gapMin: 55, gapRange: 25, gapSpeedPenalty: 0 }
   };
 
   let mode = "jev";
@@ -152,7 +157,7 @@
     nextSpawn = 150;
     obstacles = [];
     obstacleCounter = 0;
-    spawnObstacle();
+    spawnWave();
     pendingDecision = false;
     activeInput = "continue";
     duckUntil = 0;
@@ -264,25 +269,57 @@
     els["input-state"].textContent = action === "continue" ? "RUNNING" : action.toUpperCase();
   }
 
-  function spawnObstacle() {
+  function rollObstacleType() {
     const roll = Math.random();
-    let type;
-    if (score > 180 && roll > 0.74) type = Math.random() > 0.45 ? "bird_low" : "bird_high";
-    else type = roll > 0.43 ? "cactus_large" : "cactus_small";
+    if (score > 180 && roll > 0.74) return Math.random() > 0.45 ? "bird_low" : "bird_high";
+    return roll > 0.43 ? "cactus_large" : "cactus_small";
+  }
 
+  function spawnObstacle({ type = rollObstacleType(), count = 0, x = WIDTH + 20 } = {}) {
     const isBird = type.startsWith("bird");
     const [unitWidth, height] = OBSTACLE_SIZES[isBird ? "bird" : type];
-    const count = isBird ? 1 : cactusGroupSize();
+    const size = isBird ? 1 : count || cactusGroupSize();
     let y = GROUND - height;
     if (type === "bird_low") y = GROUND - 68;
     if (type === "bird_high") y = GROUND - 108;
-    obstacles.push({
+    const obstacle = {
       id: `obstacle-${++obstacleCounter}`,
-      type, x: WIDTH + 20, y, width: unitWidth * count + CACTUS_GROUP_GAP * (count - 1), height,
-      unitWidth, count,
+      type, x, y, width: unitWidth * size + CACTUS_GROUP_GAP * (size - 1), height,
+      unitWidth, count: size, jumpSpan: 0,
       passed: false, decisionRequested: false, plannedAction: null,
       actionExecuted: false, wing: 0, isBird
-    });
+    };
+    obstacles.push(obstacle);
+    return obstacle;
+  }
+
+  function spawnWave() {
+    const lead = spawnObstacle();
+    if (lead.isBird || Math.random() >= DIFFICULTY[difficulty].pairChance) return;
+    const type = Math.random() > 0.5 ? "cactus_large" : "cactus_small";
+    const [width, height] = OBSTACLE_SIZES[type];
+    const gapMax = pairGapMax(lead, width, height);
+    if (gapMax < PAIR_GAP_MIN) return;
+    const gap = PAIR_GAP_MIN + Math.random() * (gapMax - PAIR_GAP_MIN);
+    const trailing = spawnObstacle({ type, count: 1, x: lead.x + lead.width + gap });
+    lead.jumpSpan = lead.width + gap + trailing.width;
+  }
+
+  // Frames the standing hitbox stays above a cactus of this height during one jump.
+  function arcWindowFrames(height) {
+    const clearance = height - OBSTACLE_HITBOX_INSET.y - (dino.height - DINO_HITBOX.top - DINO_HITBOX.height);
+    const peakSpeed = Math.sqrt(Math.max(0, JUMP_VELOCITY ** 2 - 2 * GRAVITY * clearance));
+    return 2 * peakSpeed / GRAVITY;
+  }
+
+  // Horizontal travel during which the hitboxes overlap, beyond the obstacle's own width.
+  function hitboxOverlapExtra() {
+    return 2 * dino.width - 2 * DINO_HITBOX.left - DINO_HITBOX.width;
+  }
+
+  function pairGapMax(lead, trailingWidth, trailingHeight) {
+    const windowPx = (arcWindowFrames(Math.max(lead.height, trailingHeight)) - 2 * ARC_MARGIN_FRAMES) * speed;
+    return Math.min(windowPx - hitboxOverlapExtra() - lead.width - trailingWidth, PAIR_GAP_MAX_SHARE * WIDTH);
   }
 
   function cactusGroupSize() {
@@ -308,10 +345,9 @@
   }
 
   function jumpLeadFrames(obstacle) {
-    // The hitboxes overlap for the obstacle width plus the dinosaur's run-in and run-out.
-    // Centring the apex over that span leaves equal clearance at take-off and landing,
-    // which is what lets a wide cactus clump fit inside the fixed arc.
-    const overlapPx = obstacle.width + 2 * dino.width - 2 * DINO_HITBOX.left - DINO_HITBOX.width;
+    // Centring the apex over the overlap span leaves equal clearance at take-off and landing,
+    // which is what lets a wide clump, or a lead plus its paired cactus, fit inside the fixed arc.
+    const overlapPx = (obstacle.jumpSpan || obstacle.width) + hitboxOverlapExtra();
     return Math.max(4, JUMP_APEX_FRAMES - overlapPx / (2 * Math.max(effectiveSpeed(), 1)));
   }
 
@@ -537,7 +573,7 @@
     const startingSpeed = BASE_SPEED * gameSpeed;
     speed = Math.min(startingSpeed + MAX_SPEED_GAIN, startingSpeed + score / 500);
     if (frame >= nextSpawn) {
-      spawnObstacle();
+      spawnWave();
       nextSpawn = frame + spawnGapFrames();
     }
 
@@ -586,11 +622,16 @@
     const ducking = dino.ducking && dino.onGround;
     const box = {
       x: dino.x + DINO_HITBOX.left,
-      y: ducking ? GROUND - 31 : dino.y + 7,
+      y: ducking ? GROUND - 31 : dino.y + DINO_HITBOX.top,
       width: ducking ? 51 : DINO_HITBOX.width,
-      height: ducking ? 25 : 47
+      height: ducking ? 25 : DINO_HITBOX.height
     };
-    const obstacleBox = { x: obstacle.x + 4, y: obstacle.y + 3, width: obstacle.width - 8, height: obstacle.height - 5 };
+    const obstacleBox = {
+      x: obstacle.x + OBSTACLE_HITBOX_INSET.x,
+      y: obstacle.y + OBSTACLE_HITBOX_INSET.y,
+      width: obstacle.width - 2 * OBSTACLE_HITBOX_INSET.x,
+      height: obstacle.height - 5
+    };
     return box.x < obstacleBox.x + obstacleBox.width &&
       box.x + box.width > obstacleBox.x &&
       box.y < obstacleBox.y + obstacleBox.height &&
