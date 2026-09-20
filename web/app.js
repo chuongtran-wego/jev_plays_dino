@@ -40,6 +40,7 @@
   let latencies = [];
   let gameSession = 0;
   let engine = "connecting";
+  let engineStatuses = { jev: "connecting", laya: "connecting" };
   let lastTimestamp = performance.now();
   let audioContext = null;
   let audioUnlocked = false;
@@ -163,13 +164,20 @@
     document.querySelectorAll(".mode-button").forEach(button => {
       button.classList.toggle("active", button.dataset.mode === mode);
     });
-    const names = { human: "HUMAN IS PLAYING", rule: "RULE BOT IS PLAYING", jev: "JEV IS PLAYING" };
+    const names = {
+      human: "HUMAN IS PLAYING",
+      rule: "RULE BOT IS PLAYING",
+      jev: "JEV IS PLAYING",
+      laya: "LAYA-MLX IS PLAYING"
+    };
     els["player-label"].textContent = names[mode];
-    if (mode !== "jev") {
+    if (mode !== "jev" && mode !== "laya") {
       els["engine-badge"].textContent = mode === "rule" ? "LOCAL RULES" : "KEYBOARD";
       els["engine-badge"].classList.remove("live");
     } else {
+      engine = engineStatuses[mode] || "connecting";
       setEngineBadge();
+      void loadEngineStatus();
     }
     resetGame();
   }
@@ -320,6 +328,7 @@
     pendingDecision = true;
     const started = performance.now();
     const state = {
+      engine: mode,
       speed: Number(effectiveSpeed().toFixed(2)),
       score: Math.floor(score),
       dino_state: dino.onGround ? (dino.ducking ? "ducking" : "running") : "jumping",
@@ -378,6 +387,7 @@
     const action = decision.action || "continue";
     const risk = (1 - (probabilities.continue || 0)) * 5;
     engine = decision.engine || engine;
+    if (mode === "jev" || mode === "laya") engineStatuses[mode] = engine;
     els["decision-action"].textContent = action.toUpperCase();
     els.confidence.textContent = `${Math.round((decision.confidence || 0) * 100)}%`;
     els.latency.textContent = `${decision.latency_ms} ms`;
@@ -442,19 +452,26 @@
   }
 
   function setEngineBadge() {
-    if (mode !== "jev") return;
-    const text = engine === "jev" ? "JEV LIVE" : engine === "connecting" ? "CONNECTING" : "SIMULATION";
+    if (mode !== "jev" && mode !== "laya") return;
+    let text = "CONNECTING";
+    if (mode === "jev") {
+      text = engine === "jev" ? "JEV LIVE" : engine === "connecting" ? "CONNECTING" : "SIMULATION";
+    } else {
+      text = engine === "laya-mlx" ? "LAYA LOCAL" : engine === "connecting" ? "CONNECTING" : "LAYA OFFLINE";
+    }
     els["engine-badge"].textContent = text;
-    els["engine-badge"].classList.toggle("live", engine === "jev");
-    els["engine-label"].textContent = engine === "jev" ? "JEV AUTOPILOT" : "AI AUTOPILOT";
+    els["engine-badge"].classList.toggle("live", engine === "jev" || engine === "laya-mlx");
+    els["engine-label"].textContent = mode === "laya" ? "LOCAL AI AUTOPILOT" : engine === "jev" ? "JEV AUTOPILOT" : "AI AUTOPILOT";
   }
 
   async function loadEngineStatus() {
     try {
       const response = await fetch("/api/health");
       const status = await response.json();
-      engine = status.engine || "simulation";
+      engineStatuses = status.engines || { jev: status.engine || "simulation", laya: "unavailable" };
+      engine = engineStatuses[mode] || "simulation";
     } catch {
+      engineStatuses = { jev: "browser simulation", laya: "unavailable" };
       engine = "browser simulation";
     }
     setEngineBadge();
@@ -499,7 +516,7 @@
       els["state-obstacle"].textContent = nearest.type;
       els["state-distance"].textContent = `${Math.round(distance)} px`;
       if (mode === "rule") executeRuleDecision(nearest);
-      if (mode === "jev") {
+      if (mode === "jev" || mode === "laya") {
         requestJevDecision(nearest);
         scheduleJevAction(nearest);
       }
@@ -558,7 +575,7 @@
     drawCloud(870 - frame * .14 % 1300, 205, .65);
     drawGround();
     const nearest = nearestObstacle();
-    if (mode === "jev" && nearest && nearest.x < 570) drawSensing(nearest);
+    if ((mode === "jev" || mode === "laya") && nearest && nearest.x < 570) drawSensing(nearest);
     obstacles.forEach(drawObstacle);
     drawDino();
   }

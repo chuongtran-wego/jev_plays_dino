@@ -87,6 +87,13 @@ test("Jev requests one early maneuver plan per obstacle", () => {
   assert.match(app, /liveObstacle\.plannedAction = decision\.action;/);
 });
 
+test("Laya is available as a typed AI controller", () => {
+  assert.match(html, /class="mode-button" data-mode="laya">Laya</);
+  assert.match(app, /engine:\s*mode/);
+  assert.match(app, /mode === "jev" \|\| mode === "laya"/);
+  assert.match(app, /engine === "laya-mlx"/);
+});
+
 test("Jev mode only schedules maneuvers returned by Jev", () => {
   const requestDecision = app.match(/async function requestJevDecision\(obstacle\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
   const scheduleJevAction = app.match(/function scheduleJevAction\(obstacle\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";

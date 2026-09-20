@@ -14,7 +14,6 @@
   --amber: #f4b24e;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
-
 * { box-sizing: border-box; }
 
 html, body { height: 100%; }
@@ -67,7 +66,7 @@ button { font: inherit; }
   border-radius: 10px;
   color: var(--green);
   background: #121b1f;
-  font: 800 22px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 800 17px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .brand h1 { margin: 0; font: 750 21px/1.15 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .04em; }
 .live-status { margin-top: 6px; gap: 7px; color: var(--muted); font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
@@ -182,6 +181,11 @@ button { font: inherit; }
 .statusbar { min-height: 54px; padding: 0 28px; display: flex; align-items: center; gap: 26px; border-top: 1px solid var(--line-soft); color: var(--muted); font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .statusbar strong { margin-left: 5px; color: var(--text); }
 .footer-note { margin-left: auto; letter-spacing: .08em; color: #627077; }
+
+@media (max-width: 1280px) {
+  .topbar { align-items: flex-start; flex-wrap: wrap; }
+  .top-actions { width: 100%; flex-wrap: wrap; }
+}
 
 @media (max-width: 1100px) {
   body { overflow: auto; }

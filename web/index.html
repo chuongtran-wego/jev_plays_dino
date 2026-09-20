@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="A live decision-making demo where Jev AI plays a browser dinosaur game.">
-  <title>Jev Plays Dino</title>
+  <meta name="description" content="A live typed-decision demo where Jev or local Laya-MLX plays a browser dinosaur game.">
+  <title>Typed AI Plays Dino</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -12,9 +12,9 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">J</span>
+        <span class="brand-mark" aria-hidden="true">AI</span>
         <div>
-          <h1>JEV PLAYS DINO</h1>
+          <h1>TYPED AI PLAYS DINO</h1>
           <div class="live-status"><span class="live-dot"></span><span id="engine-label">AI AUTOPILOT</span></div>
         </div>
       </div>
@@ -23,6 +23,7 @@
           <button class="mode-button" data-mode="human">Human</button>
           <button class="mode-button" data-mode="rule">Rule</button>
           <button class="mode-button active" data-mode="jev">Jev</button>
+          <button class="mode-button" data-mode="laya">Laya</button>
         </div>
         <div class="speed-switch" role="group" aria-label="Starting speed">
           <span>Start speed</span>
@@ -69,9 +70,9 @@
         </div>
       </section>
 
-      <aside class="inspector" aria-label="Jev decision inspector">
+      <aside class="inspector" aria-label="AI decision inspector">
         <div class="inspector-heading">
-          <h2>JEV DECISION</h2>
+          <h2>AI DECISION</h2>
           <span id="engine-badge" class="engine-badge">CONNECTING</span>
         </div>
 

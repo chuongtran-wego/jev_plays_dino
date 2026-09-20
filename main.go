@@ -32,6 +32,7 @@ type obstacleState struct {
 }
 
 type decisionRequest struct {
+	Engine          string        `json:"engine,omitempty"`
 	Speed           float64       `json:"speed"`
 	Score           int           `json:"score"`
 	DinoState       string        `json:"dino_state"`
@@ -54,6 +55,12 @@ type jevClient struct {
 	client  *http.Client
 }
 
+type layaClient struct {
+	apiKey  string
+	baseURL string
+	client  *http.Client
+}
+
 func newJevClient() *jevClient {
 	baseURL := strings.TrimRight(os.Getenv("TYPESAFE_BASE_URL"), "/")
 	if baseURL == "" {
@@ -61,6 +68,18 @@ func newJevClient() *jevClient {
 	}
 	return &jevClient{
 		apiKey:  os.Getenv("TYPESAFE_API_KEY"),
+		baseURL: baseURL,
+		client:  &http.Client{Timeout: 3 * time.Second},
+	}
+}
+
+func newLayaClient() *layaClient {
+	baseURL := strings.TrimRight(os.Getenv("LAYA_BASE_URL"), "/")
+	if baseURL == "" {
+		baseURL = "http://127.0.0.1:8090"
+	}
+	return &layaClient{
+		apiKey:  os.Getenv("LAYA_API_KEY"),
 		baseURL: baseURL,
 		client:  &http.Client{Timeout: 3 * time.Second},
 	}
@@ -178,6 +197,78 @@ func (c *jevClient) decide(ctx context.Context, state decisionRequest) (decision
 	}, nil
 }
 
+func (c *layaClient) health(ctx context.Context) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/health", nil)
+	if err != nil {
+		return false
+	}
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode >= 200 && resp.StatusCode < 300
+}
+
+func (c *layaClient) decide(ctx context.Context, state decisionRequest) (decisionResponse, error) {
+	started := time.Now()
+	state.Engine = ""
+	body, err := json.Marshal(state)
+	if err != nil {
+		return decisionResponse{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/decision", bytes.NewReader(body))
+	if err != nil {
+		return decisionResponse{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return decisionResponse{}, err
+	}
+	defer resp.Body.Close()
+	data, readErr := io.ReadAll(io.LimitReader(resp.Body, 16<<10))
+	_, drainErr := io.Copy(io.Discard, resp.Body)
+	if readErr != nil {
+		return decisionResponse{}, readErr
+	}
+	if drainErr != nil {
+		return decisionResponse{}, drainErr
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return decisionResponse{}, fmt.Errorf("laya returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
+	}
+
+	var result decisionResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		return decisionResponse{}, err
+	}
+	if result.ObstacleID != state.Obstacle.ID {
+		return decisionResponse{}, errors.New("laya returned a stale obstacle id")
+	}
+	if !validAction(result.Action) {
+		return decisionResponse{}, errors.New("laya returned an invalid action")
+	}
+	if result.Probabilities == nil {
+		return decisionResponse{}, errors.New("laya returned no probabilities")
+	}
+	if result.Engine == "" {
+		result.Engine = "laya-mlx"
+	}
+	if result.LatencyMS <= 0 {
+		result.LatencyMS = time.Since(started).Milliseconds()
+	}
+	return result, nil
+}
+
 func validAction(action string) bool {
 	return action == "jump" || action == "duck" || action == "continue"
 }
@@ -258,6 +349,7 @@ func main() {
 		log.Fatalf("load .env: %v", err)
 	}
 	client := newJevClient()
+	laya := newLayaClient()
 	if client.apiKey != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		if err := client.warm(ctx); err != nil {
@@ -268,8 +360,19 @@ func main() {
 	limiter := newRateLimiter()
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "engine": map[bool]string{true: "jev", false: "simulation"}[client.apiKey != ""]})
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, req *http.Request) {
+		ctx, cancel := context.WithTimeout(req.Context(), 600*time.Millisecond)
+		defer cancel()
+		layaStatus := "unavailable"
+		if laya.health(ctx) {
+			layaStatus = "laya-mlx"
+		}
+		jevStatus := map[bool]string{true: "jev", false: "simulation"}[client.apiKey != ""]
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"engine":  jevStatus,
+			"engines": map[string]string{"jev": jevStatus, "laya": layaStatus},
+		})
 	})
 	mux.HandleFunc("POST /api/decision", func(w http.ResponseWriter, req *http.Request) {
 		started := time.Now()
@@ -287,7 +390,17 @@ func main() {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing game state"})
 			return
 		}
-		result, err := client.decide(req.Context(), state)
+		var result decisionResponse
+		var err error
+		switch state.Engine {
+		case "", "jev":
+			result, err = client.decide(req.Context(), state)
+		case "laya":
+			result, err = laya.decide(req.Context(), state)
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown decision engine"})
+			return
+		}
 		if err != nil {
 			log.Printf("decision error: %v", err)
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "decision service unavailable"})

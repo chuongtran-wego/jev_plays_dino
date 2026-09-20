@@ -189,6 +189,54 @@ func TestJevClientReadsErrorResponseToEOF(t *testing.T) {
 	}
 }
 
+func TestLayaClientSendsStateAndReadsDecision(t *testing.T) {
+	var payload decisionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/v1/decision" {
+			t.Fatalf("unexpected path %s", req.URL.Path)
+		}
+		if got := req.Header.Get("Authorization"); got != "Bearer local-secret" {
+			t.Fatalf("unexpected authorization %q", got)
+		}
+		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		_, _ = io.WriteString(w, `{"obstacle_id":"obstacle-1","action":"jump","probabilities":{"jump":0.94,"duck":0.01,"continue":0.05},"confidence":0.91,"latency_ms":12,"engine":"laya-mlx"}`)
+	}))
+	defer server.Close()
+
+	client := &layaClient{apiKey: "local-secret", baseURL: server.URL, client: server.Client()}
+	result, err := client.decide(context.Background(), decisionRequest{
+		Engine:   "laya",
+		Speed:    8,
+		Obstacle: obstacleState{ID: "obstacle-1", Type: "cactus_large"},
+	})
+	if err != nil {
+		t.Fatalf("decide: %v", err)
+	}
+	if payload.Engine != "" {
+		t.Fatalf("expected proxy-only engine field to be omitted, got %q", payload.Engine)
+	}
+	if result.Action != "jump" || result.Engine != "laya-mlx" || result.LatencyMS != 12 {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestLayaClientRejectsStaleObstacle(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"obstacle_id":"old","action":"jump","probabilities":{"jump":1},"confidence":1,"latency_ms":8}`)
+	}))
+	defer server.Close()
+
+	client := &layaClient{baseURL: server.URL, client: server.Client()}
+	_, err := client.decide(context.Background(), decisionRequest{
+		Obstacle: obstacleState{ID: "new", Type: "cactus_large"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "stale obstacle") {
+		t.Fatalf("expected stale obstacle error, got %v", err)
+	}
+}
+
 func TestValidAction(t *testing.T) {
 	for _, action := range []string{"jump", "duck", "continue"} {
 		if !validAction(action) {

@@ -3,3 +3,5 @@ bin/
 dist/
 node_modules/
 .sites-runtime/
+laya-server/.venv/
+laya-server/__pycache__/
