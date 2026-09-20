@@ -7,6 +7,7 @@ Typed AI Plays Dino is a browser game where either [TypeSafe AI](https://typesaf
 ## Features
 
 - Four play modes: Human, deterministic Rule bot, Jev API, and local Laya-MLX.
+- Two difficulties. Easy shows one single cactus or bird at a time. Hard spawns clumps of two or three cacti and keeps two obstacles on screen.
 - Typed Jev decisions with visible probabilities, confidence, collision risk, and latency.
 - Starting-speed presets at `1x`, `2x`, `4x`, and `8x`; every run continues accelerating from the selected starting speed.
 - Pixel-style sound effects implemented with the Web Audio API.
@@ -77,6 +78,11 @@ The service binds to `127.0.0.1:8090` by default. To expose it to another machin
 
 The `1x`, `2x`, `4x`, and `8x` controls select the starting speed for the next run. Speed then increases gradually as the score grows, matching the original endless-runner behavior.
 
+The **Easy** and **Hard** controls select the difficulty for the next run:
+
+- **Easy** spawns one obstacle every 103 to 188 frames, so one single cactus or bird is on screen at a time.
+- **Hard** spawns one obstacle every 50 to 80 frames, so two obstacles are usually on screen at the `1x` preset. Cacti arrive alone or in clumps of two, and clumps of three appear once the speed reaches 7. The gap is measured in frames, so the spacing grows with speed while the jump arc stays clearable.
+
 ## How the project works
 
 The application has three runtime layers:
@@ -100,10 +106,10 @@ sequenceDiagram
     Engine-->>Go: Choice, probabilities, confidence
     Go-->>Game: Normalized decision response
     Game->>Game: Record the plan and show telemetry
-    Game->>Game: Execute jump at <= 18 frames or duck at <= 25 frames
+    Game->>Game: Jump when the arc apex centers on the obstacle, duck at <= 25 frames
 ```
 
-Planning and execution are deliberately separate. A returned `jump` or `duck` is stored on the live obstacle instead of being executed immediately. This gives the model enough network/inference time while preserving the late timing required by the game physics. Responses from a previous game session, responses for obstacles that no longer exist, and responses arriving after an action ran are displayed when appropriate but never executed.
+Planning and execution are deliberately separate. A returned `jump` or `duck` is stored on the live obstacle instead of being executed immediately. This gives the model enough network/inference time while preserving the late timing required by the game physics. The jump fires when the obstacle's collision span sits centered under the top of the arc, so a wide cactus clump gets the full airtime. Responses from a previous game session, responses for obstacles that no longer exist, and responses arriving after an action ran are displayed when appropriate but never executed.
 
 ## Decision API
 
@@ -121,6 +127,7 @@ The browser sends the selected engine and a snapshot of the nearest obstacle:
   "obstacle": {
     "id": "obstacle-7",
     "type": "cactus_large",
+    "count": 1,
     "distance": 432,
     "width": 36,
     "height": 66,
@@ -129,7 +136,7 @@ The browser sends the selected engine and a snapshot of the nearest obstacle:
 }
 ```
 
-`engine` accepts `jev` or `laya`; an omitted value defaults to `jev`. The server requires a positive `speed` plus `obstacle.id` and `obstacle.type`. Request bodies are limited to 16 KiB and each client IP is limited to 180 requests per minute.
+`engine` accepts `jev` or `laya`; an omitted value defaults to `jev`. The server requires a positive `speed` plus `obstacle.id` and `obstacle.type`. `obstacle.count` is the number of cacti in the clump, from 1 to 3, and `obstacle.width` covers the whole clump. Birds always report a count of 1. Request bodies are limited to 16 KiB and each client IP is limited to 180 requests per minute.
 
 A successful response has the same shape for every engine:
 
@@ -195,7 +202,7 @@ This is a typed question rather than a free-form chat prompt:
 - `criteria` defines the meaning of each allowed choice: ground cactus → `jump`, low bird → `duck`, high bird → `continue`.
 - Jev returns `answers.next_action.choice`, a probability for each choice, and a confidence score. The Go server validates the choice and maps those fields to the public decision response.
 
-The Laya service constructs the same `state` and `questions` objects and passes them to `_agent.predict(...)`, so hosted and local inference solve the same typed task. Fields such as `score`, `speed`, obstacle dimensions, distance, and ID are not forwarded to either model. Timing still matters through the derived `time_to_collision_ms` value.
+The Laya service constructs the same `state` and `questions` objects and passes them to `_agent.predict(...)`, so hosted and local inference solve the same typed task. Fields such as `score`, `speed`, obstacle dimensions, clump count, distance, and ID are not forwarded to either model. Timing still matters through the derived `time_to_collision_ms` value.
 
 ### Engine-specific flow
 

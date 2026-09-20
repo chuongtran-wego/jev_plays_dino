@@ -25,6 +25,7 @@ var webFiles embed.FS
 type obstacleState struct {
 	ID       string  `json:"id"`
 	Type     string  `json:"type"`
+	Count    int     `json:"count,omitempty"`
 	Distance float64 `json:"distance"`
 	Width    float64 `json:"width"`
 	Height   float64 `json:"height"`

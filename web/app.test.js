@@ -183,3 +183,77 @@ test("canvas renders at device pixel ratio while CSS owns the displayed size", (
   assert.match(app, /window\.addEventListener\("resize", sizeCanvas\)/);
   assert.ok(app.indexOf("sizeCanvas();") < app.indexOf("requestAnimationFrame(loop);\n})();"));
 });
+
+function constant(name) {
+  return Number(app.match(new RegExp(`const ${name} = (-?[\\d.]+);`))?.[1]);
+}
+
+function difficultyPreset(level) {
+  const source = app.match(new RegExp(`${level}: \\{([^}]+)\\}`))?.[1] || "";
+  return Object.fromEntries([...source.matchAll(/(\w+):\s*(-?[\d.]+)/g)].map(match => [match[1], Number(match[2])]));
+}
+
+test("difficulty switch offers easy and hard with easy as the default", () => {
+  assert.match(html, /class="difficulty-button active" data-difficulty="easy">Easy</);
+  assert.match(html, /class="difficulty-button" data-difficulty="hard">Hard</);
+  assert.match(app, /let difficulty = "easy";/);
+  assert.match(app, /\["easy", "hard"\]\.includes\(level\)/);
+  assert.match(app, /setDifficulty\(button\.dataset\.difficulty\)/);
+  assert.match(app, /function setDifficulty\(level\)\s*\{[\s\S]*?resetGame\(\);\n  \}/);
+});
+
+test("hard mode spawns cactus clumps of up to three while easy keeps single cacti", () => {
+  const spawnObstacle = app.match(/function spawnObstacle\(\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+
+  assert.equal(difficultyPreset("easy").cactusGroupMax, 1);
+  assert.equal(difficultyPreset("hard").cactusGroupMax, 3);
+  assert.match(spawnObstacle, /const count = isBird \? 1 : cactusGroupSize\(\);/);
+  assert.match(spawnObstacle, /width: unitWidth \* count \+ CACTUS_GROUP_GAP \* \(count - 1\)/);
+  assert.match(app, /speed >= CACTUS_TRIPLE_MIN_SPEED \? 3 : 2/);
+  assert.match(app, /for \(let i = 0; i < obstacle\.count; i\+\+\)/);
+  assert.match(app, /count: obstacle\.count,/);
+});
+
+test("hard mode spacing keeps two obstacles in view yet leaves room to land between them", () => {
+  const easy = difficultyPreset("easy");
+  const hard = difficultyPreset("hard");
+  const airtimeFrames = 2 * -constant("JUMP_VELOCITY") / constant("GRAVITY");
+  const topPresetSpeed = constant("BASE_SPEED") + constant("MAX_SPEED_GAIN");
+
+  assert.deepEqual(easy, { cactusGroupMax: 1, gapMin: 115, gapRange: 85, gapSpeedPenalty: 2 });
+  assert.equal(hard.gapSpeedPenalty, 0);
+  assert.ok(hard.gapMin >= airtimeFrames + 5, "hard gap must cover the full jump arc plus a landing margin");
+  assert.ok((hard.gapMin + hard.gapRange) * topPresetSpeed <= constant("WIDTH"), "hard gap must keep two obstacles on screen at the 1x preset");
+  assert.match(app, /nextSpawn = frame \+ spawnGapFrames\(\);/);
+});
+
+test("jump lead centres the arc over the obstacle for both the rule bot and scheduled plans", () => {
+  const ruleDecision = app.match(/function ruleDecision\(obstacle\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+  const scheduled = app.match(/function executeScheduledAction\(obstacle, action\)\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+
+  assert.match(ruleDecision, /framesToCollision <= jumpLeadFrames\(obstacle\)/);
+  assert.match(scheduled, /framesToCollision <= jumpLeadFrames\(obstacle\)/);
+  assert.doesNotMatch(ruleDecision + scheduled, /framesToCollision <= 18/);
+  assert.match(app, /const JUMP_APEX_FRAMES = -JUMP_VELOCITY \/ GRAVITY;/);
+});
+
+test("the widest hard clump clears the jump arc at its minimum spawn speed", () => {
+  const gravity = constant("GRAVITY");
+  const velocity = -constant("JUMP_VELOCITY");
+  const [unitWidth, height] = app.match(/cactus_large: \[(\d+), (\d+)\]/).slice(1).map(Number);
+  const width = 3 * unitWidth + 2 * constant("CACTUS_GROUP_GAP");
+  const speed = constant("CACTUS_TRIPLE_MIN_SPEED");
+  // The standing hitbox clears the cactus hitbox once the dinosaur is more than height - 5 px up.
+  const clearance = height - 5;
+  const root = Math.sqrt(velocity ** 2 - 2 * gravity * clearance);
+  const aboveCactusFrames = 2 * root / gravity;
+  const overlapFrames = (width + 45) / speed;
+
+  assert.ok(aboveCactusFrames - overlapFrames >= 4, `only ${(aboveCactusFrames - overlapFrames).toFixed(1)} frames of margin`);
+});
+
+test("AI plans are requested for every obstacle inside the lookahead, not just the nearest", () => {
+  assert.match(app, /function nextUnplannedObstacle\(\)/);
+  assert.match(app, /requestJevDecision\(nextUnplannedObstacle\(\)\);/);
+  assert.match(app, /scheduleJevAction\(nearest\);/);
+});

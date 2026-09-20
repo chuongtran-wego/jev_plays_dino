@@ -21,8 +21,21 @@
   const GRAVITY = 0.72;
   const JUMP_VELOCITY = -14.2;
   const PLANNING_LOOKAHEAD = 900;
+  // Frames from take-off to the top of the arc; the arc is symmetric around it.
+  const JUMP_APEX_FRAMES = -JUMP_VELOCITY / GRAVITY;
+  const DINO_HITBOX = { left: 8, width: 35 };
+  const OBSTACLE_SIZES = { cactus_large: [36, 66], cactus_small: [25, 46], bird: [52, 30] };
+  const CACTUS_GROUP_GAP = 2;
+  // Triple clumps need a longer arc window, so they wait for speed to build like the Chrome game.
+  const CACTUS_TRIPLE_MIN_SPEED = 7;
+  // Spawn gaps are in frames: spacing then scales with speed while the fixed-length jump arc stays clearable.
+  const DIFFICULTY = {
+    easy: { cactusGroupMax: 1, gapMin: 115, gapRange: 85, gapSpeedPenalty: 2 },
+    hard: { cactusGroupMax: 3, gapMin: 50, gapRange: 30, gapSpeedPenalty: 0 }
+  };
 
   let mode = "jev";
+  let difficulty = "easy";
   let paused = false;
   let gameOver = false;
   let awaitingStart = false;
@@ -164,13 +177,7 @@
     document.querySelectorAll(".mode-button").forEach(button => {
       button.classList.toggle("active", button.dataset.mode === mode);
     });
-    const names = {
-      human: "HUMAN IS PLAYING",
-      rule: "RULE BOT IS PLAYING",
-      jev: "JEV IS PLAYING",
-      laya: "LAYA-MLX IS PLAYING"
-    };
-    els["player-label"].textContent = names[mode];
+    updatePlayerLabel();
     if (mode !== "jev" && mode !== "laya") {
       els["engine-badge"].textContent = mode === "rule" ? "LOCAL RULES" : "KEYBOARD";
       els["engine-badge"].classList.remove("live");
@@ -179,6 +186,26 @@
       setEngineBadge();
       void loadEngineStatus();
     }
+    resetGame();
+  }
+
+  function updatePlayerLabel() {
+    const names = {
+      human: "HUMAN IS PLAYING",
+      rule: "RULE BOT IS PLAYING",
+      jev: "JEV IS PLAYING",
+      laya: "LAYA-MLX IS PLAYING"
+    };
+    els["player-label"].textContent = difficulty === "hard" ? `${names[mode]} · HARD` : names[mode];
+  }
+
+  function setDifficulty(level) {
+    if (!["easy", "hard"].includes(level)) return;
+    difficulty = level;
+    document.querySelectorAll(".difficulty-button").forEach(button => {
+      button.classList.toggle("active", button.dataset.difficulty === difficulty);
+    });
+    updatePlayerLabel();
     resetGame();
   }
 
@@ -244,20 +271,48 @@
     else type = roll > 0.43 ? "cactus_large" : "cactus_small";
 
     const isBird = type.startsWith("bird");
-    const dimensions = type === "cactus_large" ? [36, 66] : type === "cactus_small" ? [25, 46] : [52, 30];
-    let y = GROUND - dimensions[1];
+    const [unitWidth, height] = OBSTACLE_SIZES[isBird ? "bird" : type];
+    const count = isBird ? 1 : cactusGroupSize();
+    let y = GROUND - height;
     if (type === "bird_low") y = GROUND - 68;
     if (type === "bird_high") y = GROUND - 108;
     obstacles.push({
       id: `obstacle-${++obstacleCounter}`,
-      type, x: WIDTH + 20, y, width: dimensions[0], height: dimensions[1],
+      type, x: WIDTH + 20, y, width: unitWidth * count + CACTUS_GROUP_GAP * (count - 1), height,
+      unitWidth, count,
       passed: false, decisionRequested: false, plannedAction: null,
       actionExecuted: false, wing: 0, isBird
     });
   }
 
+  function cactusGroupSize() {
+    const maxCount = Math.min(DIFFICULTY[difficulty].cactusGroupMax, speed >= CACTUS_TRIPLE_MIN_SPEED ? 3 : 2);
+    return 1 + Math.floor(Math.random() * maxCount);
+  }
+
+  function spawnGapFrames() {
+    const preset = DIFFICULTY[difficulty];
+    return Math.round(preset.gapMin + Math.random() * preset.gapRange - speed * preset.gapSpeedPenalty);
+  }
+
+  function obstacleLabel(obstacle) {
+    return obstacle.count > 1 ? `${obstacle.type} ×${obstacle.count}` : obstacle.type;
+  }
+
   function nearestObstacle() {
     return obstacles.find(obstacle => obstacle.x + obstacle.width >= dino.x) || null;
+  }
+
+  function nextUnplannedObstacle() {
+    return obstacles.find(obstacle => !obstacle.decisionRequested && obstacle.x + obstacle.width >= dino.x) || null;
+  }
+
+  function jumpLeadFrames(obstacle) {
+    // The hitboxes overlap for the obstacle width plus the dinosaur's run-in and run-out.
+    // Centring the apex over that span leaves equal clearance at take-off and landing,
+    // which is what lets a wide cactus clump fit inside the fixed arc.
+    const overlapPx = obstacle.width + 2 * dino.width - 2 * DINO_HITBOX.left - DINO_HITBOX.width;
+    return Math.max(4, JUMP_APEX_FRAMES - overlapPx / (2 * Math.max(effectiveSpeed(), 1)));
   }
 
   function ruleDecision(obstacle) {
@@ -266,10 +321,7 @@
     const framesToCollision = distance / Math.max(speed, 1);
 
     if (obstacle.type.startsWith("cactus")) {
-      // Jump late enough that the dinosaur stays airborne until the cactus's
-      // trailing edge has cleared its collision box. An earlier jump can look
-      // correct but land on wide cacti before they have fully passed.
-      if (dino.onGround && framesToCollision <= 18) return "jump";
+      if (dino.onGround && framesToCollision <= jumpLeadFrames(obstacle)) return "jump";
       return "continue";
     }
 
@@ -301,7 +353,7 @@
     const distance = Math.max(0, obstacle.x - (dino.x + dino.width));
     const framesToCollision = distance / Math.max(effectiveSpeed(), 1);
 
-    if (action === "jump" && dino.onGround && framesToCollision <= 18) {
+    if (action === "jump" && dino.onGround && framesToCollision <= jumpLeadFrames(obstacle)) {
       obstacle.actionExecuted = true;
       jump();
       return;
@@ -336,6 +388,7 @@
       obstacle: {
         id: obstacle.id,
         type: obstacle.type,
+        count: obstacle.count,
         distance: Math.round(distance),
         width: obstacle.width,
         height: obstacle.height,
@@ -394,7 +447,7 @@
     setProbability("jump", probabilities.jump || 0);
     setProbability("continue", probabilities.continue || 0);
     setProbability("duck", probabilities.duck || 0);
-    els["state-obstacle"].textContent = state.obstacle.type;
+    els["state-obstacle"].textContent = obstacleLabel(state.obstacle);
     els["state-distance"].textContent = `${state.obstacle.distance} px`;
     els["state-speed"].textContent = state.speed.toFixed(1);
     updateRisk(risk);
@@ -485,7 +538,7 @@
     speed = Math.min(startingSpeed + MAX_SPEED_GAIN, startingSpeed + score / 500);
     if (frame >= nextSpawn) {
       spawnObstacle();
-      nextSpawn = frame + Math.round(115 + Math.random() * 85 - speed * 2);
+      nextSpawn = frame + spawnGapFrames();
     }
 
     if (!dino.onGround) {
@@ -513,11 +566,11 @@
     const nearest = nearestObstacle();
     if (nearest) {
       const distance = Math.max(0, nearest.x - (dino.x + dino.width));
-      els["state-obstacle"].textContent = nearest.type;
+      els["state-obstacle"].textContent = obstacleLabel(nearest);
       els["state-distance"].textContent = `${Math.round(distance)} px`;
       if (mode === "rule") executeRuleDecision(nearest);
       if (mode === "jev" || mode === "laya") {
-        requestJevDecision(nearest);
+        requestJevDecision(nextUnplannedObstacle());
         scheduleJevAction(nearest);
       }
     } else {
@@ -532,9 +585,9 @@
   function collides(obstacle) {
     const ducking = dino.ducking && dino.onGround;
     const box = {
-      x: dino.x + 8,
+      x: dino.x + DINO_HITBOX.left,
       y: ducking ? GROUND - 31 : dino.y + 7,
-      width: ducking ? 51 : 35,
+      width: ducking ? 51 : DINO_HITBOX.width,
       height: ducking ? 25 : 47
     };
     const obstacleBox = { x: obstacle.x + 4, y: obstacle.y + 3, width: obstacle.width - 8, height: obstacle.height - 5 };
@@ -688,9 +741,15 @@
       ctx.fillRect(x + 39, y + 11, 3, 3);
       return;
     }
-    const x = obstacle.x, y = obstacle.y, h = obstacle.height;
+    for (let i = 0; i < obstacle.count; i++) {
+      drawCactus(obstacle.x + i * (obstacle.unitWidth + CACTUS_GROUP_GAP), obstacle);
+    }
+  }
+
+  function drawCactus(x, obstacle) {
+    const y = obstacle.y, h = obstacle.height;
     const trunkWidth = obstacle.type === "cactus_large" ? 15 : 11;
-    const trunkX = x + Math.floor((obstacle.width - trunkWidth) / 2);
+    const trunkX = x + Math.floor((obstacle.unitWidth - trunkWidth) / 2);
     ctx.fillRect(trunkX, y, trunkWidth, h);
     ctx.fillRect(trunkX - 10, y + h * .38, 10, 9);
     ctx.fillRect(trunkX - 14, y + h * .22, 6, h * .25);
@@ -710,6 +769,7 @@
 
   document.querySelectorAll(".mode-button").forEach(button => button.addEventListener("click", () => setMode(button.dataset.mode)));
   document.querySelectorAll(".speed-button").forEach(button => button.addEventListener("click", () => setGameSpeed(Number(button.dataset.speed))));
+  document.querySelectorAll(".difficulty-button").forEach(button => button.addEventListener("click", () => setDifficulty(button.dataset.difficulty)));
   els["sound-button"].addEventListener("click", () => {
     const wasEnabled = soundEnabled;
     soundEnabled = !soundEnabled;

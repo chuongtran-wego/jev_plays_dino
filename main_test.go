@@ -209,13 +209,16 @@ func TestLayaClientSendsStateAndReadsDecision(t *testing.T) {
 	result, err := client.decide(context.Background(), decisionRequest{
 		Engine:   "laya",
 		Speed:    8,
-		Obstacle: obstacleState{ID: "obstacle-1", Type: "cactus_large"},
+		Obstacle: obstacleState{ID: "obstacle-1", Type: "cactus_large", Count: 3},
 	})
 	if err != nil {
 		t.Fatalf("decide: %v", err)
 	}
 	if payload.Engine != "" {
 		t.Fatalf("expected proxy-only engine field to be omitted, got %q", payload.Engine)
+	}
+	if payload.Obstacle.Count != 3 {
+		t.Fatalf("expected cactus clump size to be forwarded, got %d", payload.Obstacle.Count)
 	}
 	if result.Action != "jump" || result.Engine != "laya-mlx" || result.LatencyMS != 12 {
 		t.Fatalf("unexpected result: %#v", result)

@@ -32,9 +32,16 @@
           <button class="speed-button" data-speed="4">4×</button>
           <button class="speed-button" data-speed="8">8×</button>
         </div>
-        <button id="sound-button" class="control-button" aria-label="Mute sound" title="Mute sound">♫ <span id="sound-label">Sound</span></button>
-        <button id="pause-button" class="control-button" aria-label="Pause game">Ⅱ <span>Pause</span></button>
-        <button id="reset-button" class="control-button" aria-label="Reset game">↻ <span>Reset</span></button>
+        <div class="difficulty-switch" role="group" aria-label="Difficulty">
+          <span>Level</span>
+          <button class="difficulty-button active" data-difficulty="easy">Easy</button>
+          <button class="difficulty-button" data-difficulty="hard">Hard</button>
+        </div>
+        <div class="control-group">
+          <button id="sound-button" class="control-button" aria-label="Mute sound" title="Mute sound">♫ <span id="sound-label">Sound</span></button>
+          <button id="pause-button" class="control-button" aria-label="Pause game" title="Pause game">Ⅱ <span>Pause</span></button>
+          <button id="reset-button" class="control-button" aria-label="Reset game" title="Reset game">↻ <span>Reset</span></button>
+        </div>
       </div>
     </header>
 
