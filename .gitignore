@@ -6,3 +6,4 @@ node_modules/
 laya-server/.venv/
 laya-server/__pycache__/
 .vscode/
+.worktrees/
