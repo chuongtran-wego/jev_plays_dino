@@ -6,8 +6,6 @@ Typed AI Plays Dino is a browser game where either [TypeSafe AI](https://typesaf
 
 https://github.com/user-attachments/assets/a5324c53-a8ff-4f79-90e5-84d16732606b
 
-![Jev Plays Dino game interface](docs/screenshot.jpg)
-
 ## Features
 
 - Four play modes: Human, deterministic Rule bot, Jev API, and local Laya-MLX.
