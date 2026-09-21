@@ -2,6 +2,10 @@
 
 Typed AI Plays Dino is a browser game where either [TypeSafe AI](https://typesafe.ai/)'s Jev API or the local [Laya-MLX](https://github.com/mizorewww/laya-mlx) runtime controls an original pixel dinosaur. Both engines receive the same structured game state and choose whether to jump, duck, or continue. The interface shows every decision, probability, confidence score, input, and latency in real time.
 
+## Demo
+
+https://github.com/user-attachments/assets/a5324c53-a8ff-4f79-90e5-84d16732606b
+
 ![Jev Plays Dino game interface](docs/screenshot.jpg)
 
 ## Features
