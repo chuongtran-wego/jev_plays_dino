@@ -9,7 +9,7 @@ a GitHub attachment, and reference the generated attachment URL from a
 dedicated README section. The binary stays outside Git history while GitHub
 serves it through its native video player.
 
-**Tech Stack:** FFmpeg, GitHub Markdown, Git, GitHub web editor
+**Tech Stack:** FFmpeg, GitHub Markdown, Git, GitHub CLI
 
 ---
 
@@ -31,7 +31,7 @@ and enable fast start.
 - Modify: `README.md`
 
 **Step 1:** Upload `/tmp/jev_plays_dino.mp4` as a GitHub Markdown attachment
-for `chuongtran-wego/jev_plays_dino`.
+through the documentation pull request for `chuongtran-wego/jev_plays_dino`.
 
 **Step 2:** Add `## Demo` below the introduction and place the generated
 attachment URL alone in its paragraph.
