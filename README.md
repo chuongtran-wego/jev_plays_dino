@@ -43,13 +43,19 @@ LAYA_API_KEY=
 PORT=8080
 ```
 
-Start the server:
+Start only the Go application (Jev uses simulation mode when no API key is configured):
 
 ```bash
 go run .
 ```
 
-Open <http://localhost:8080>. Values already exported in your shell take precedence over `.env`.
+After setting up the Laya virtualenv as described below, start both the Go application and Laya-MLX with:
+
+```bash
+./start.sh
+```
+
+Open <http://localhost:8080>. Press `Ctrl+C` to stop both services. Values already exported in your shell take precedence over `.env`.
 
 ## Run Laya-MLX locally
 
@@ -61,13 +67,11 @@ python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-set -a
-source .env
-set +a
-python server.py
+cd ..
+./start.sh
 ```
 
-The first start downloads the `aac6fef/laya-mlx` checkpoint. Later starts use the local Hugging Face cache. Keep this service running, start the Go application in another terminal, then choose **Laya** in the game.
+The startup script loads both `.env` files and runs Laya-MLX and the Go application together. The first start downloads the `aac6fef/laya-mlx` checkpoint. Later starts use the local Hugging Face cache. Once both services are running, choose **Laya** in the game.
 
 The service binds to `127.0.0.1:8090` by default. To expose it to another machine, set `LAYA_HOST=0.0.0.0`, configure the same secret as `LAYA_SERVER_API_KEY` in the Python service and `LAYA_API_KEY` in the Go application, and protect the connection with a private network or TLS reverse proxy.
 
